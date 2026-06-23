@@ -1790,7 +1790,6 @@ __metadata:
   resolution: "@pawells/config-provider-env@workspace:packages/config-provider-env"
   dependencies:
     "@pawells/config": "workspace:*"
-    "@pawells/typescript-common": "npm:^3.0.5"
     tslib: "npm:^2.8.1"
     zod: "npm:^4.4.3"
   languageName: unknown
