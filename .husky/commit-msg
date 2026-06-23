@@ -1,14 +1,50 @@
 #!/bin/sh
 # Husky commit-msg hook
-# Enforces project policy: no Co-Authored-By lines in commits
+# 1. Enforces Conventional Commits format
+# 2. Rejects Co-Authored-By lines
 
 COMMIT_MSG_FILE="$1"
-COMMIT_MSG=$(cat "$COMMIT_MSG_FILE")
 
-if echo "$COMMIT_MSG" | grep -q "Co-Authored-By"; then
+# Extract the subject line: first non-empty, non-comment line
+SUBJECT=$(grep -v '^#' "$COMMIT_MSG_FILE" | grep -v '^[[:space:]]*$' | head -1)
+
+# Exempt merge and revert commits (git-generated, non-conventional subjects)
+case "$SUBJECT" in
+  Merge\ *|Revert\ *)
+    ;;
+  *)
+    # Validate Conventional Commits format:
+    # <type>(<optional scope>): <subject>
+    # Allowed types: feat, fix, chore, docs, test, refactor, build, ci
+    if ! echo "$SUBJECT" | grep -Eq '^(feat|fix|chore|docs|test|refactor|build|ci)(\([^)]+\))?: .+'; then
+      cat >&2 <<'EOF'
+
+Commit rejected: subject line does not follow Conventional Commits format.
+
+Expected format:
+  <type>(<optional scope>): <subject>
+
+Allowed types:
+  feat, fix, chore, docs, test, refactor, build, ci
+
+Examples:
+  feat(config): add support for nested schema validation
+  fix(config-provider-env): handle missing dotenv file gracefully
+  chore: update vitest to 4.1.0
+
+Please reword your commit message and try again.
+
+EOF
+      exit 1
+    fi
+    ;;
+esac
+
+# Reject Co-Authored-By lines (project policy: single-author commits only)
+if grep -q "Co-Authored-By" "$COMMIT_MSG_FILE"; then
   cat >&2 <<'EOF'
 
-❌ Commit rejected: Co-Authored-By line found
+Commit rejected: Co-Authored-By line found
 
 This project does not use co-authored commits. Each commit must be authored
 by a single person or system. See .claude/settings.json for policy configuration.
