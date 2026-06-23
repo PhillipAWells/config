@@ -1,0 +1,130 @@
+{
+	"$schema": "./node_modules/nx/schemas/nx-schema.json",
+	"sync": {
+		"applyChanges": true
+	},
+	"namedInputs": {
+		"default": [
+			"{projectRoot}/**/*",
+			"sharedGlobals"
+		],
+		"production": [
+			"default",
+			"!{projectRoot}/.eslintrc.json",
+			"!{projectRoot}/eslint.config.mjs",
+			"!{projectRoot}/**/?(*.)+(spec|test).[jt]s?(x)?(.snap)",
+			"!{projectRoot}/tsconfig.spec.json"
+		],
+		"sharedGlobals": []
+	},
+	"plugins": [
+		{
+			"plugin": "@nx/js/typescript",
+			"options": {
+				"typecheck": {
+					"targetName": "typecheck"
+				},
+				"build": {
+					"targetName": "build",
+					"configName": "tsconfig.lib.json",
+					"buildDepsName": "build-deps",
+					"watchDepsName": "watch-deps"
+				}
+			}
+		},
+		{
+			"plugin": "@nx/eslint/plugin",
+			"options": {
+				"targetName": "lint"
+			}
+		},
+		{
+			"plugin": "@nx/vite/plugin",
+			"options": {
+				"buildTargetName": "build",
+				"testTargetName": "test",
+				"serveTargetName": "serve",
+				"devTargetName": "dev",
+				"previewTargetName": "preview",
+				"serveStaticTargetName": "serve-static",
+				"typecheckTargetName": "typecheck",
+				"buildDepsTargetName": "build-deps",
+				"watchDepsTargetName": "watch-deps"
+			}
+		},
+		{
+			"plugin": "@nx/vitest",
+			"options": {
+				"testTargetName": "test",
+				"ciTargetName": "test-ci",
+				"testMode": "watch"
+			}
+		}
+	],
+	"neverConnectToCloud": true,
+	"disableDaemon": true,
+	"analytics": false,
+	"release": {
+		"version": {
+			"preVersionCommand": "yarn dlx nx run-many -t build"
+		}
+	},
+	"targetDefaults": {
+		"test": {
+			"dependsOn": [
+				"^build"
+			],
+			"options": {
+				"pool": "forks",
+				"poolOptions": {
+					"forks": {
+						"maxForks": 2,
+						"minForks": 1
+					}
+				},
+				"fileParallelism": false,
+				"coverage": false
+			},
+			"configurations": {
+				"coverage": {
+					"coverage": true
+				}
+			}
+		},
+		"test:coverage": {
+			"dependsOn": [
+				"^build"
+			],
+			"options": {
+				"pool": "forks",
+				"poolOptions": {
+					"forks": {
+						"maxForks": 2,
+						"minForks": 1
+					}
+				},
+				"fileParallelism": false,
+				"coverage": true
+			}
+		},
+		"typecheck": {
+			"inputs": [
+				"default",
+				"^production",
+				{
+					"externalDependencies": [
+						"typescript"
+					]
+				}
+			],
+			"outputs": [
+				"{projectRoot}/dist/tsconfig.lib.tsbuildinfo",
+				"{projectRoot}/out-tsc/vitest/tsconfig.spec.tsbuildinfo",
+				"{projectRoot}/tsconfig.tsbuildinfo"
+			]
+		}
+	},
+	"tui": {
+		"enabled": false
+	}
+}

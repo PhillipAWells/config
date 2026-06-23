@@ -1,0 +1,16 @@
+{
+	"extends": "./tsconfig.base.json",
+	"compileOnSave": false,
+	"files": [],
+	"references": [
+    {
+      "path": "./packages/config-provider-json"
+    },
+    {
+      "path": "./packages/config-provider-env"
+    },
+    {
+      "path": "./packages/config"
+    }
+  ]
+}
