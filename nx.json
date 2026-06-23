@@ -51,7 +51,9 @@
 	"disableDaemon": true,
 	"analytics": false,
 	"release": {
-		"projects": ["packages/*"],
+		"projects": [
+			"packages/*"
+		],
 		"version": {
 			"preVersionCommand": "yarn dlx nx run-many -t build",
 			"git": {

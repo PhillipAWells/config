@@ -56,3 +56,4 @@ test-output
 .verdaccio
 .env
 *.tsbuildinfo
+.nx/migrate-runs

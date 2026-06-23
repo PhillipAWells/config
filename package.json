@@ -28,34 +28,31 @@
 		"prepare": "husky"
 	},
 	"devDependencies": {
-		"@eslint/js": "^9.8.0",
-		"@nx/devkit": "22.7.5",
-		"@nx/eslint": "22.7.5",
-		"@nx/eslint-plugin": "22.7.5",
-		"@nx/js": "22.7.5",
-		"@nx/vite": "22.7.5",
-		"@nx/vitest": "22.7.5",
+		"@eslint/js": "^10.0.1",
+		"@nx/devkit": "23.0.1",
+		"@nx/eslint": "23.0.1",
+		"@nx/eslint-plugin": "23.0.1",
+		"@nx/js": "23.0.1",
+		"@nx/vite": "23.0.1",
+		"@nx/vitest": "23.0.1",
 		"@stylistic/eslint-plugin": "^5.10.0",
-		"@types/node": "^24.0.0",
-		"@typescript-eslint/parser": "^8.0.0",
+		"@types/node": "^24.13.2",
+		"@typescript-eslint/parser": "^8.62.0",
 		"@vitest/coverage-v8": "~4.1.0",
-		"eslint": "^9.8.0",
+		"eslint": "^10.5.0",
 		"husky": "^9.1.7",
-		"jsonc-eslint-parser": "^2.1.0",
-		"nx": "22.7.5",
+		"jsonc-eslint-parser": "^3.1.0",
+		"nx": "23.0.1",
 		"typescript": "~6.0.0",
-		"typescript-eslint": "^8.40.0",
-		"verdaccio": "^6.7.2",
-		"vite": "^8.0.16",
+		"typescript-eslint": "^8.62.0",
+		"verdaccio": "^6.7.4",
+		"vite": "^8.1.0",
 		"vitest": "~4.1.0"
 	},
 	"workspaces": [
 		"packages/*"
 	],
 	"packageManager": "yarn@4.17.0",
-	"resolutions": {
-		"nx": "^22.7.2"
-	},
 	"nx": {
 		"includedScripts": [],
 		"targets": {
