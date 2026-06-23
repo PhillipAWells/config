@@ -27,9 +27,11 @@ All packages are at v3.0.0, `"type": "module"` (ESM only), Node >=22.0.0.
 
 | Package | Version range |
 |---|---|
-| `@pawells/typescript-common` | `^3.0.5` |
+| `@pawells/typescript-common`* | `^3.0.5` |
 | `tslib` | `^2.8.1` |
 | `zod` | `^4.4.3` |
+
+* Used by `@pawells/config` and `@pawells/config-provider-json`; not a dependency of `@pawells/config-provider-env` (dropped in v3.0.0).
 
 `config-provider-env` and `config-provider-json` depend on `@pawells/config` via `workspace:*`.
 

@@ -1,102 +1,87 @@
 # @pawells/config-provider-env
 
 [![CI](https://github.com/PhillipAWells/config/actions/workflows/ci.yml/badge.svg)](https://github.com/PhillipAWells/config/actions/workflows/ci.yml)
-[![npm version](https://img.shields.io/npm/v/@pawells/config-provider-env.svg)](https://www.npmjs.com/package/@pawells/config-provider-env)
+[![npm](https://img.shields.io/npm/v/@pawells/config-provider-env)](https://www.npmjs.com/package/@pawells/config-provider-env)
 [![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen)](https://nodejs.org)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-
-Environment variable and dotenv file configuration provider for [@pawells/config](https://github.com/pawells/config).
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../../LICENSE)
 
 ## Description
 
-`@pawells/config-provider-env` is a configuration provider that integrates with `@pawells/config` to load settings from environment variables and `.env` files.
+`@pawells/config-provider-env` is a configuration provider for `@pawells/config` that loads settings from `process.env` and an optional `.env` file. Values in the dotenv file overwrite `process.env` for the same key. Environment variable strings are parsed to their native JavaScript types (numbers, booleans, arrays, `null`) before being handed to `ConfigManager` for schema validation.
 
-The provider merges environment variables from `process.env` with values parsed from a `.env` file (if present), with the dotenv file taking precedence. All values are intelligently parsed — JSON-encoded booleans, numbers, arrays, and `null` are converted to their native JavaScript types, while plain strings remain unchanged. For persistence, the provider can save configuration snapshots to `.env` files in template or current-values mode, with automatic handling of secrets and inline documentation.
+The provider also supports writing configuration back to disk (`Save`), making it suitable for generating `.env.example` templates and snapshotting live values.
 
-This makes it ideal for local development workflows and containerized deployments where configuration is managed through environment variables.
+See the [workspace README](../../README.md) for an end-to-end quick start. See [CHANGELOG.md](../../CHANGELOG.md) for version history.
 
 ## Requirements
 
-- **Node.js** ≥ 22.0.0
-- **TypeScript** ≥ 5.0 (for development)
-- **@pawells/config** — the parent config manager package
+- Node.js `>=22.0.0`
+- `@pawells/config` (peer dependency, installed as a direct dependency via `workspace:*` in the monorepo)
 
 ## Installation
 
-Using npm:
-```bash
-npm install @pawells/config-provider-env @pawells/config
-```
-
-Using Yarn:
-```bash
+```sh
 yarn add @pawells/config-provider-env @pawells/config
 ```
 
-Using pnpm:
-```bash
-pnpm add @pawells/config-provider-env @pawells/config
-```
+All packages are ESM-only (`"type": "module"`).
 
 ## Quick Start
 
-### 1. Register the provider
-
 ```typescript
-import { ConfigManager } from '@pawells/config';
+import { ConfigManager, RegisterConfigSchema, Secret } from '@pawells/config';
 import { ConfigEnvironmentProvider } from '@pawells/config-provider-env';
+import { z } from 'zod';
 
-// Register the environment provider
-const envProvider = await ConfigEnvironmentProvider.Register({
-  name: 'environment',
-  path: './.env'
-});
+// Register the provider BEFORE importing any schema modules.
+// The factory method creates, registers, and returns the provider instance.
+const envProvider = await ConfigEnvironmentProvider.Register({ path: '.env' });
 
-// Now ConfigManager.Get() will include values from process.env and .env
-```
+// Define a schema — provider values are already available.
+const AppConfig = RegisterConfigSchema('App', z.object({
+    HOST: z.string().min(1).default('localhost'),
+    PORT: z.coerce.number().int().positive().default(3000),
+    API_KEY: Secret(z.string().min(1)).default(''),
+}));
 
-### 2. Define your configuration schema
+// Read typed values.
+const host = AppConfig.Get('HOST'); // string
+const port = AppConfig.Get('PORT'); // number
 
-```typescript
-import { z } from 'zod/v4';
-import { ConfigManager } from '@pawells/config';
+// Generate .env.example — defaults written; secrets blank.
+await ConfigManager.Save(envProvider, { path: '.env.example' });
 
-ConfigManager.RegisterConfigSchema(
-  z.object({
-    DATABASE_URL: z.string().describe('PostgreSQL connection string'),
-    PORT: z.coerce.number().default(3000).describe('Server port'),
-    DEBUG: z.boolean().default(false)
-  })
-);
-
-// Values are resolved from registered providers
-const dbUrl = ConfigManager.Get('DATABASE_URL');
-const port = ConfigManager.Get('PORT');
-```
-
-### 3. Load and save configurations
-
-```typescript
-// Load configuration
-await envProvider.Load();
-
-// Generate a template .env file with secrets blanked
-await ConfigManager.Save(envProvider, {
-  path: '.env.example'
-});
-
-// Snapshot current runtime values
-await ConfigManager.Save(envProvider, {
-  path: '.env.snapshot',
-  useCurrentValues: true
-});
+// Snapshot current runtime values — secrets included.
+await ConfigManager.Save(envProvider, { path: '.env.snapshot', useCurrentValues: true });
 ```
 
 ## API Reference
 
-### ConfigEnvironmentProvider
+### `ConfigEnvironmentProvider`
 
-A configuration provider that extends the `@pawells/config` async provider contract.
+An async configuration provider that extends `ConfigProvider` from `@pawells/config`.
+
+#### `static Register(options?)`
+
+Convenience factory: creates a `ConfigEnvironmentProvider` instance, registers it with `ConfigManager`, and returns it.
+
+```typescript
+static async Register(
+    options?: Partial<TConfigENVProviderOptions>
+): Promise<ConfigEnvironmentProvider>
+```
+
+Unspecified options use schema defaults (`name: 'environment'`, `path: <cwd>/.env`).
+
+```typescript
+// Register with all defaults
+const provider = await ConfigEnvironmentProvider.Register();
+
+// Register with a custom path
+const provider = await ConfigEnvironmentProvider.Register({
+    path: '.env.production'
+});
+```
 
 #### Constructor
 
@@ -104,200 +89,122 @@ A configuration provider that extends the `@pawells/config` async provider contr
 new ConfigEnvironmentProvider(options: TConfigENVProviderOptions)
 ```
 
-**Parameters:**
-- `options` — Provider configuration object
-  - `name: string` — Unique provider identifier (default: `'environment'`)
-  - `path: string` — Path to the `.env` file to load (default: `.env` in current working directory)
+After constructing, pass the instance to `ConfigManager.RegisterProvider` manually if you need the instance before registration:
 
-**Example:**
 ```typescript
-const provider = new ConfigEnvironmentProvider({
-  name: 'my-env',
-  path: '.env.local'
-});
+import { ConfigManager } from '@pawells/config';
+import { ConfigEnvironmentProvider } from '@pawells/config-provider-env';
+
+const provider = new ConfigEnvironmentProvider({ name: 'env', path: '.env' });
+await ConfigManager.RegisterProvider(provider);
 ```
 
-#### Methods
+#### `Load()`
 
-##### `Load(): Promise<Record<string, unknown>>`
-
-Loads configuration values from `process.env` and optionally a `.env` file.
-
-**Behavior:**
-- Reads all entries from `process.env` first
-- If `path` is configured, reads and parses the `.env` file, with values overwriting environment variables
-- All values are passed through `ParseEnvVarValue()` to convert JSON-encoded types
-- If the `.env` file cannot be read (missing, permission denied, etc.), the file is skipped and only `process.env` is returned; errors are logged via `console.warn`
-
-**Returns:**
-- A record mapping config keys to their parsed values
-
-**Example:**
 ```typescript
-// process.env = { KEYCLOAK_HOST: 'prod.example.com' }
-// .env        = { KEYCLOAK_HOST: 'localhost', KEYCLOAK_PORT: '8080' }
-const provider = new ConfigEnvironmentProvider({
-  name: 'env',
-  path: '.env'
-});
-const config = await provider.Load();
-// → { KEYCLOAK_HOST: 'localhost', KEYCLOAK_PORT: 8080 }
+async Load(): Promise<Record<string, unknown>>
 ```
 
-##### `Save(entries: readonly ConfigSaveEntry[], options?: TConfigENVProviderSaveOptions): Promise<void>`
+Loads configuration from `process.env` and optionally the `.env` file at `options.path`:
 
-Saves configuration values to a `.env`-format file.
+1. All entries in `process.env` are read first.
+2. If `options.path` is set, the dotenv file is parsed and its entries overwrite `process.env` values for the same key.
+3. All string values are passed through an internal parser that converts JSON-encoded booleans, numbers, arrays, and `null` to their native JavaScript types. Plain strings are returned unchanged.
+4. If the dotenv file is absent (`ENOENT`), it is silently skipped — only `process.env` is returned.
+5. Security exceptions (symlink path, path-traversal sequence) are propagated as errors.
 
-**Parameters:**
-- `entries` — Config entries supplied by `ConfigManager.Save()`
-- `options` — Optional save behavior
-  - `path: string` — Output file path; overrides `this.options.path` if provided
-  - `useCurrentValues: boolean` — When `true`, write current live values; when `false` (default), write registered defaults
-
-**Behavior:**
-- In template mode (default): secrets are always written with blank values, suitable for generating `.env.example`
-- In current-values mode: all values including secrets are written with their live values
-- Descriptions from Zod `.describe()` annotations are emitted as comment lines before each key
-
-**Example:**
 ```typescript
-const provider = new ConfigEnvironmentProvider({
-  name: 'env',
-  path: '.env'
-});
-
-// Generate a .env.example template
-await ConfigManager.Save(provider, { path: '.env.example' });
-
-// Snapshot current runtime config
-await ConfigManager.Save(provider, {
-  path: '.env.snapshot',
-  useCurrentValues: true
-});
+// .env: APP_PORT=8080
+// process.env: APP_HOST=prod.example.com
+const values = await provider.Load();
+// → { APP_HOST: 'prod.example.com', APP_PORT: 8080 }
 ```
 
-##### `static Register(options?: Partial<TConfigENVProviderOptions>): Promise<ConfigEnvironmentProvider>`
+**Throws** `ConfigError` when the dotenv path is a symlink or contains a `..` traversal sequence.
 
-Creates a provider instance and registers it with `ConfigManager`.
+#### `Save(entries, options?)`
 
-**Parameters:**
-- `options` — Optional partial provider configuration; unspecified fields use schema defaults
-
-**Returns:**
-- A promise resolving to the registered provider instance
-
-**Example:**
 ```typescript
-const envProvider = await ConfigEnvironmentProvider.Register({
-  path: '.env.production'
-});
+async Save(
+    entries: readonly ConfigSaveEntry[],
+    options?: TConfigENVProviderSaveOptions
+): Promise<void>
 ```
 
-### Type Definitions
+Writes configuration entries to a `.env`-format file. Call via `ConfigManager.Save` rather than directly.
+
+**Template mode** (`useCurrentValues: false`, the default):
+- Each entry is written as `KEY=<default value>`.
+- Entries where `entry.isSecret` is `true` are written as `KEY=` (blank value), regardless of their default.
+- This is suitable for generating `.env.example` files safe to commit.
+
+**Current-values mode** (`useCurrentValues: true`):
+- All entries including secrets are written with their live resolved values.
+- Use for runtime snapshots or debugging.
+
+If a Zod `.describe()` annotation is present on the field, it is emitted as a `# comment` line immediately before the key.
+
+```typescript
+// Template output in .env.example:
+// # Server port
+// APP_PORT=3000
+// # API key
+// APP_API_KEY=
+```
+
+**Options:**
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `path` | `string` (optional) | `this.options.path` | Output file path; overrides the constructor path if provided. |
+| `useCurrentValues` | `boolean` (optional) | `false` | `false` = registered defaults, secrets blank; `true` = live resolved values. |
+
+---
+
+### Options types
 
 #### `TConfigENVProviderOptions`
 
 ```typescript
 type TConfigENVProviderOptions = {
-  name: string;     // Default: 'environment'
-  path: string;     // Default: '.env' in cwd
+    name: string  // Default: 'environment'
+    path: string  // Default: <cwd>/.env; '..' sequences are rejected
 }
 ```
 
-#### `TConfigENVProviderLoadOptions`
-
-Currently reserved for future use; an empty object may be passed.
+Validated by `CONFIG_ENV_PROVIDER_OPTIONS_SCHEMA`.
 
 #### `TConfigENVProviderSaveOptions`
 
 ```typescript
 type TConfigENVProviderSaveOptions = {
-  path?: string;
-  useCurrentValues?: boolean;  // Default: false
+    path?: string            // Overrides constructor path if provided; '..' sequences are rejected
+    useCurrentValues?: boolean  // Default: false
 }
 ```
 
-### Utility Functions
+Validated by `CONFIG_ENV_PROVIDER_SAVE_OPTIONS_SCHEMA`.
 
-All utility functions are exported for advanced use cases (e.g., parsing env files outside the provider).
+---
 
-#### `ParseEnvVarValue(envVarValue: string): unknown`
+### Assertion and validation utilities
 
-Intelligently parses an environment variable string to its native JavaScript type.
+| Export | Description |
+|---|---|
+| `CONFIG_ENV_PROVIDER_OPTIONS_SCHEMA` | Zod schema for `TConfigENVProviderOptions` |
+| `AssertConfigENVProviderOptions(options)` | Asserts conformance; throws `ZodError` otherwise |
+| `ValidateConfigENVProviderOptions(options)` | Returns `true` if valid; `false` otherwise |
+| `CONFIG_ENV_PROVIDER_SAVE_OPTIONS_SCHEMA` | Zod schema for `TConfigENVProviderSaveOptions` |
+| `AssertConfigENVProviderSaveOptions(options)` | Asserts conformance; throws `ZodError` otherwise |
+| `ValidateConfigENVProviderSaveOptions(options)` | Returns `true` if valid; `false` otherwise |
 
-- Attempts `JSON.parse()` for encoded values: booleans (`'true'`, `'false'`), numbers, arrays, and `null`
-- Falls back to returning the original string if JSON parsing fails
-- Uses a fast-path optimization to skip parsing for plain strings
+---
 
-**Example:**
-```typescript
-ParseEnvVarValue('true')        // → true (boolean)
-ParseEnvVarValue('42')          // → 42 (number)
-ParseEnvVarValue('["a","b"]')   // → ['a', 'b'] (string[])
-ParseEnvVarValue('hello')       // → 'hello' (string, unchanged)
-```
+### Security
 
-#### `ParseDotEnvFile(path: string): Record<string, string>`
-
-Parses a `.env` file from disk into a flat key/value record.
-
-**Processing rules:**
-- Lines starting with `#` (after whitespace trimming) are comments and are skipped
-- Blank lines are skipped
-- Lines with `=` are split on the first `=`; key is trimmed; value is trimmed and surrounding quotes are stripped
-- Inline comments (e.g., `KEY=value # comment`) are stripped from unquoted values
-- Windows-style `\r\n` line endings are normalized
-- Paths containing `..` traversal sequences are rejected
-
-**Returns:**
-- A record mapping keys to their raw string values
-
-**Throws:**
-- `ConfigError` — When the path contains `..` directory traversal sequences
-- `Error` — When the file cannot be read (e.g., not found, permission denied)
-
-**Example:**
-```typescript
-// .env contents:
-// # Database config
-// HOST=localhost
-// PORT=3000
-// SECRET="my-token"
-const values = ParseDotEnvFile('./.env');
-// → { HOST: 'localhost', PORT: '3000', SECRET: 'my-token' }
-```
-
-#### `SerializeConfigValue(value: unknown): string`
-
-Serializes a configuration value to its `.env` string representation.
-
-**Conversion rules:**
-- `null` or `undefined` → `''` (blank)
-- Arrays → JSON-stringified (e.g., `["a","b"]`)
-- `Date` → ISO 8601 string
-- All other values → `String(value)`
-
-**Example:**
-```typescript
-SerializeConfigValue('hello')           // → 'hello'
-SerializeConfigValue(42)                // → '42'
-SerializeConfigValue(['a', 'b'])        // → '["a","b"]'
-SerializeConfigValue(new Date('2024-01-01T00:00:00.000Z'))
-// → '2024-01-01T00:00:00.000Z'
-SerializeConfigValue(null)              // → ''
-```
-
-### Assertion & Validation Functions
-
-For runtime validation of options objects:
-
-- `AssertConfigENVProviderOptions(options: unknown): asserts options is TConfigENVProviderOptions`
-- `ValidateConfigENVProviderOptions(options: unknown): boolean`
-- `AssertConfigENVProviderLoadOptions(options: unknown): asserts options is TConfigENVProviderLoadOptions`
-- `ValidateConfigENVProviderLoadOptions(options: unknown): boolean`
-- `AssertConfigENVProviderSaveOptions(options: unknown): asserts options is TConfigENVProviderSaveOptions`
-- `ValidateConfigENVProviderSaveOptions(options: unknown): boolean`
+- **Symlink rejection** — The dotenv path is checked; if it resolves to a symlink, `Load()` throws a `ConfigError`.
+- **Path-traversal protection** — Any path containing `..` is rejected by the options schema at construction time and at save time.
 
 ## License
 
-MIT
+MIT — See [LICENSE](../../LICENSE) for details.

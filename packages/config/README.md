@@ -1,286 +1,309 @@
-# Configuration Utility
+# @pawells/config
 
 [![CI](https://github.com/PhillipAWells/config/actions/workflows/ci.yml/badge.svg)](https://github.com/PhillipAWells/config/actions/workflows/ci.yml)
-[![npm version](https://img.shields.io/npm/v/@pawells/config.svg)](https://www.npmjs.com/package/@pawells/config)
+[![npm](https://img.shields.io/npm/v/@pawells/config)](https://www.npmjs.com/package/@pawells/config)
 [![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen)](https://nodejs.org)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../../LICENSE)
 
 ## Description
 
-Runtime configuration manager with Zod schema validation and a pluggable provider system. Register named schemas with `RegisterConfigSchema` and supply one or more providers (async `IConfigProvider` implementations from `@pawells/config-provider-env`, `@pawells/config-provider-json`, or a custom provider) so that every key resolves through a layered precedence chain: defaults → providers → runtime overrides. Includes a `ConfigManager.Save` API for generating `.env` templates or snapshotting live values.
+`@pawells/config` is the core package of the `@pawells/config-workspace` suite. It provides:
+
+- A **global singleton** (`ConfigManager`) and an **instance-based** (`ScopedConfigManager`) configuration manager, both backed by [Zod](https://zod.dev) schema validation.
+- A **schema factory** (`RegisterConfigSchema`) that derives typed, namespaced accessor objects from a Zod object schema, eliminating the need to call `ConfigManager.Register` for every key individually.
+- A **`Secret()` wrapper** that marks Zod field schemas as sensitive — secret values are automatically redacted in templates and error messages.
+- An **abstract base class** (`ConfigProvider`) and two interfaces (`IConfigProvider`, `ISyncConfigProvider`) for building custom providers.
+- A structured **error hierarchy** rooted at `ConfigError`.
+
+Values are resolved through a three-tier precedence model:
+
+```
+Registered defaults  <  Provider values  <  Runtime overrides (Set)
+```
+
+See the [workspace README](../../README.md) for an end-to-end quick start. See [CHANGELOG.md](../../CHANGELOG.md) for version history.
 
 ## Requirements
 
-- **Node.js**: 22.0.0 or later
-- **TypeScript**: 6.0.0 or later (if consuming from source)
-- **zod**: ^4.4.3 (peer dependency, required at runtime for schema validation)
+- Node.js `>=22.0.0`
+- `zod` `^4.4.3` (peer dependency, installed automatically)
 
 ## Installation
 
-Install from npm:
-
-```bash
-npm install @pawells/config
-```
-
-Or with yarn:
-
-```bash
+```sh
 yarn add @pawells/config
 ```
 
 ## Quick Start
 
-### Startup Order: Providers Before Schema Imports
-
-Providers must be registered before any schema module is imported. Schema modules call `RegisterConfigSchema` at module evaluation time, so any provider registered after that point will not be visible to already-evaluated schemas.
-
 ```typescript
-// main.ts — register providers FIRST, before any schema imports
-import {
-  ConfigManager,
-} from '@pawells/config';
+import { z } from 'zod';
+import { ConfigManager, RegisterConfigSchema, Secret } from '@pawells/config';
 import { ConfigEnvironmentProvider } from '@pawells/config-provider-env';
-import { ConfigJSONProvider } from '@pawells/config-provider-json';
 
-// Providers are async; await their registration before importing schemas
-await ConfigManager.RegisterProvider(new ConfigEnvironmentProvider({ name: 'env', path: '.env' }));
-await ConfigManager.RegisterProvider(new ConfigJSONProvider({ name: 'json', path: './config.json' }));
+// 1. Register providers BEFORE importing schema modules.
+//    Provider values are merged into schemas at registration time.
+await ConfigEnvironmentProvider.Register({ path: '.env' });
 
-// Now import schema modules — providers are already loaded
-import { KeycloakConfig } from './config/keycloak.js';
+// 2. Define and register a schema.
+//    The prefix 'DATABASE_' is derived from the name 'Database'.
+const DatabaseConfig = RegisterConfigSchema('Database', z.object({
+    HOST: z.string().min(1).default('localhost'),
+    PORT: z.coerce.number().int().positive().default(5432),
+    PASSWORD: Secret(z.string().min(1)).default(''),
+}));
 
-const url = KeycloakConfig.Get('AUTH_SERVER_URL'); // resolved: env/JSON/defaults
-```
+// 3. Retrieve validated, typed values.
+const host = DatabaseConfig.Get('HOST');  // string
+const port = DatabaseConfig.Get('PORT');  // number
 
-### Defining a Schema Module
-
-```typescript
-// config/keycloak.ts
-import { z } from 'zod/v4';
-import { RegisterConfigSchema, Secret } from '@pawells/config';
-
-const KEYCLOAK_SCHEMA = z.object({
-  AUTH_SERVER_URL: z.string().url().default('http://localhost:8080/auth'),
-  REALM: z.string().min(1).default('master'),
-  CLIENT_ID: z.string().min(1).default('nestjs-example-service'),
-  CLIENT_SECRET: Secret(z.string().default('')),
-});
-
-// Registered immediately — prefix is derived as 'KEYCLOAK_'
-export const KeycloakConfig = RegisterConfigSchema('Keycloak', KEYCLOAK_SCHEMA);
-```
-
-### Reading Values, Overriding, and Saving
-
-```typescript
-// Reading values
-const url = KeycloakConfig.Get('AUTH_SERVER_URL'); // string
-const realm = KeycloakConfig.Get('REALM'); // string
-
-// Validate without setting
-KeycloakConfig.Validate('REALM', 'my-realm'); // true/false
-
-// Runtime override
-KeycloakConfig.Set('REALM', 'my-realm', 'OVERRIDE');
-
-// Save .env.example — registered defaults; secret fields written as blank
-const envProvider = new ConfigEnvironmentProvider();
-ConfigManager.Save(envProvider, { path: '.env.example' });
-
-// Snapshot current resolved values
-ConfigManager.Save(envProvider, { path: '.env', useCurrentValues: true });
-```
-
-### Error Handling
-
-```typescript
-import {
-  ConfigNotRegisteredError,
-  ConfigNotSetError,
-  ConfigError,
-} from '@pawells/config';
-
-try {
-  const value = KeycloakConfig.Get('AUTH_SERVER_URL');
-} catch (error) {
-  if (error instanceof ConfigNotRegisteredError) {
-    /* key not registered */
-  }
-  if (error instanceof ConfigNotSetError) {
-    /* value was never set */
-  }
-  if (error instanceof ConfigError) {
-    /* validation failure; check error.cause */
-  }
-}
+// 4. Redact secrets for safe logging.
+console.log(DatabaseConfig.Redact());
+// → { HOST: 'localhost', PORT: 5432, PASSWORD: '***' }
 ```
 
 ## API Reference
 
-### RegisterConfigSchema
+### `RegisterConfigSchema(name, schema)`
+
+Registers all fields of a Zod object schema with `ConfigManager` and returns a typed accessor object.
 
 ```typescript
-RegisterConfigSchema<TSchema>(name: string, schema: z.ZodObject<TSchema>): IConfigSchemaObject<...>
+function RegisterConfigSchema<TSchema extends z.ZodRawShape>(
+    name: string,
+    schema: z.ZodObject<TSchema>
+): IConfigSchemaObject<z.infer<typeof schema>>
 ```
 
-- `name` — Namespace name. The environment variable prefix is derived as `name.toUpperCase() + '_'` (e.g. `'Keycloak'` → `KEYCLOAK_`).
-- `schema` — Zod object schema. All fields should declare defaults.
-- Registers all fields with `ConfigManager` immediately at call time.
-- **Important:** Providers must be registered before this module is imported.
+- `name` — Human-readable namespace. The env-var prefix is derived as `name.toUpperCase() + '_'` (e.g. `'Database'` → `DATABASE_`).
+- `schema` — A `z.object(...)` schema. Every field should declare a `.default(...)` value.
 
-### IConfigSchemaObject Methods
+**Returns** an `IConfigSchemaObject` with the following members:
 
-| Method                        | Description                                                             |
-| ----------------------------- | ----------------------------------------------------------------------- |
-| `name`                        | The namespace name passed to `RegisterConfigSchema`.                    |
-| `Get<K>(key)`                 | Retrieve a typed value. Resolves DEFAULT → providers → OVERRIDE.        |
-| `Set<K>(key, value, source?)` | Set a value (`'OVERRIDE'` by default); validates against the schema.    |
-| `Validate<K>(key, value)`     | Validate a value without setting it; returns boolean.                   |
-| `ParseENV(throwOnError?)`     | Read `process.env` entries for this namespace and set them as OVERRIDE. |
-| `IsSecret(key)`               | Returns `true` if the field was marked with `Secret()`.                 |
-| `GetSecretKeys()`             | Returns all secret field names in schema order.                         |
-| `Redact()`                    | Returns a snapshot with secret values replaced by `'***'`.              |
+| Member | Signature | Description |
+|---|---|---|
+| `name` | `string` | The namespace name passed to `RegisterConfigSchema`. |
+| `Get` | `Get<K>(key: K): TConfig[K]` | Retrieve the typed, validated value for `key`. Resolves DEFAULT → providers → OVERRIDE. |
+| `Set` | `Set<K>(key: K, value: TConfig[K], source?: TConfigSource): void` | Set a value. Target is `'OVERRIDE'` by default. |
+| `Validate` | `Validate<K>(key: K, value: unknown): boolean` | Check whether a value satisfies the field schema without setting it. |
+| `IsSecret` | `IsSecret(key: TKeys): boolean` | Returns `true` if the field was wrapped with `Secret()`. |
+| `GetSecretKeys` | `GetSecretKeys(): Array<TKeys>` | Returns all keys marked with `Secret()` in schema insertion order. |
+| `Redact` | `Redact(): Record<string, unknown>` | Returns all resolved values; secret fields are replaced with `'***'`. Unset/unregistered keys are omitted. |
 
-### ConfigManager
+**Important:** Call `ConfigManager.RegisterProvider` for all providers before any module that calls `RegisterConfigSchema` is imported. Provider values are captured when schemas are registered.
 
-| Method                            | Description                                                                 |
-| --------------------------------- | --------------------------------------------------------------------------- |
-| `RegisterProvider(provider)`      | Register an async config provider. Returns `Promise<void>`. Must be awaited before importing schema modules. |
-| `RegisterSyncProvider(provider)`  | Register a sync config provider (escape hatch). Use only in non-async contexts. |
-| `RegisterNamespace(name, prefix)` | Called automatically by `RegisterConfigSchema`; rarely needed directly.     |
-| `Save(provider, options)`         | Build entries for all registered keys and delegate to `provider.save()`.    |
-| `Register(key, schema, default)`  | Register an individual fully-qualified key directly (advanced).             |
-| `Set(key, value, target?)`        | Set a value for a fully-qualified key.                                      |
-| `Get(key, source?)`               | Get a value for a fully-qualified key.                                      |
-| `GetSchema(key)`                  | Retrieve the Zod schema for a fully-qualified key.                          |
-| `Reset()`                         | Clear all state. For testing only.                                          |
+---
 
-### Providers
+### `Secret(schema)`
 
-Provider implementations are located in separate packages:
-
-#### @pawells/config-provider-env
-
-Async environment variable + dotenv provider.
+Marks a Zod field schema as secret using Zod v4's `globalRegistry` metadata. The TypeScript inferred type of the schema is unchanged.
 
 ```typescript
-import { ConfigEnvironmentProvider } from '@pawells/config-provider-env';
-const provider = new ConfigEnvironmentProvider({ name: 'env', path: '.env', required: true });
-await ConfigManager.RegisterProvider(provider);
+function Secret<T extends z.ZodTypeAny>(schema: T): T
 ```
 
-Reads all `process.env` entries at provider load time. If `path` is given it overlays a dotenv file on top (dotenv values win over `process.env`). When `required = true` the provider throws if the file is missing; `false` silently skips it.
-
-Implements `ISaveableConfigProvider`: async `Save()` writes `.env` format. In template mode (default), secret fields are written as empty values.
-
-#### @pawells/config-provider-json
-
-Async JSON file provider.
-
 ```typescript
-import { ConfigJSONProvider } from '@pawells/config-provider-json';
-const provider = new ConfigJSONProvider({ name: 'json', path: './config.json', required: true });
-await ConfigManager.RegisterProvider(provider);
+import { Secret } from '@pawells/config';
+import { z } from 'zod';
+
+// In a schema definition:
+const schema = z.object({
+    API_KEY: Secret(z.string().min(32)).default(''),
+});
 ```
 
-Reads a JSON file and flattens nested keys into fully-qualified names (e.g. `{ "KEYCLOAK": { "HOST": "x" } }` → `KEYCLOAK_HOST`). When `required = true` the provider throws if the file is missing.
+Secret fields are:
+- Blanked (empty value) in `.env` template output (`ConfigEnvironmentProvider.Save` in template mode).
+- Written as `null` in JSON template output (`ConfigJSONProvider.Save` in template mode).
+- Replaced with `'***'` by `IConfigSchemaObject.Redact()`.
+- Sanitized from `ConfigValidationError` messages and causes on validation failure.
 
-Implements `ISaveableConfigProvider`: async `Save()` writes nested JSON. In template mode, secret fields are written as `null`.
+---
 
-#### ConfigManager.Save Options
+### `ConfigManager`
 
-```typescript
-ConfigManager.Save(provider, { path: '.env.example' }); // template mode
-ConfigManager.Save(provider, { path: '.env', useCurrentValues: true }); // current values
-```
-
-| Option             | Default  | Description                                                                  |
-| ------------------ | -------- | ---------------------------------------------------------------------------- |
-| `path`             | required | Output file path.                                                            |
-| `useCurrentValues` | `false`  | `false` = registered defaults, secrets blank. `true` = live resolved values. |
-
-#### Custom Providers
-
-Implement `IConfigProvider` for async read-only sources, `ISaveableConfigProvider` for async writable ones, or `ISyncConfigProvider` for sync-only escape hatches:
+A static singleton configuration manager. All state is shared across the process for the lifetime of the module.
 
 ```typescript
-// Async provider (recommended)
-class MyAsyncProvider implements IConfigProvider {
-  readonly name = 'my-async';
-  async Load(): Promise<Record<string, unknown>> {
-    return { MY_APP_HOST: 'localhost' }; // use fully-qualified key names
-  }
-  async Save(): Promise<void> {
-    // optional: implement to make it ISaveableConfigProvider
-  }
+class ConfigManager {
+    static Register(key: string, schema: z.ZodTypeAny, defaultValue: unknown): void
+    static Get(key: string, source?: TConfigSource): TConfigValueTypes
+    static Set<T extends TConfigValueTypes>(key: string, value: T, target?: TConfigSource): void
+    static GetSchema(key: string): z.ZodTypeAny
+    static async RegisterProvider(provider: IConfigProvider): Promise<void>
+    static RegisterSyncProvider(provider: ISyncConfigProvider): void
+    static async Save(provider: IConfigProvider, options: SaveOptions): Promise<void>
+    static RegisterNamespace(name: string, prefix: string): void
+    static SetValidationWarningHandler(handler: ((key: string, providerName: string) => void) | undefined): void
+    static Reset(): void
 }
-await ConfigManager.RegisterProvider(new MyAsyncProvider());
+```
 
-// Sync provider (escape hatch for non-async contexts)
-class MySyncProvider implements ISyncConfigProvider {
-  readonly name = 'my-sync';
-  LoadSync(): Record<string, unknown> {
-    return { MY_APP_HOST: 'localhost' };
-  }
+| Method | Description |
+|---|---|
+| `Register(key, schema, defaultValue)` | Register a key with its Zod schema and initial default. Throws `ConfigRegistrationError` if re-registered with a different schema. Throws `ConfigValidationError` if `defaultValue` fails. |
+| `Get(key, source?)` | Retrieve the resolved value for `key`. Pass `'DEFAULT'` or `'OVERRIDE'` to read a specific tier only. Throws `ConfigNotRegisteredError` or `ConfigNotSetError` if unavailable. |
+| `Set(key, value, target?)` | Set a value on the `'OVERRIDE'` tier (default) or `'DEFAULT'` tier. Throws `ConfigNotRegisteredError` or `ConfigValidationError`. |
+| `GetSchema(key)` | Return the registered Zod schema for `key`. Throws `ConfigNotRegisteredError`. |
+| `RegisterProvider(provider)` | Async. Register an `IConfigProvider`; calls `provider.Load()` immediately. Provider values are the middle tier. Last-registered wins for duplicate keys. |
+| `RegisterSyncProvider(provider)` | Register an `ISyncConfigProvider`; calls `provider.LoadSync()` immediately. Use only when `await` is not available. |
+| `Save(provider, options)` | Async. Build a `ConfigSaveEntry[]` for every registered key and delegate to `provider.Save()`. |
+| `RegisterNamespace(name, prefix)` | Record a `prefix → sectionName` mapping used by `Save()` to split keys into section/field components. Called automatically by `RegisterConfigSchema`. |
+| `SetValidationWarningHandler(handler)` | Set a callback invoked when a provider value fails schema validation. Silent by default. Pass `undefined` to clear. |
+| `Reset()` | Clear all state. Intended for test isolation only. |
+
+**`TConfigSource`** — `'DEFAULT' | 'OVERRIDE'`
+
+**`TConfigValueTypes`** — the full union accepted by all schemas:
+`string | number | boolean | Date | string[] | number[] | boolean[] | undefined | null`
+
+**`TConfig`** — `Map<string, TConfigValueTypes>`
+
+---
+
+### `ScopedConfigManager`
+
+An instance-based configuration manager. Each instance maintains fully independent state, making it suitable for test isolation and multi-tenant scenarios. The public API mirrors `ConfigManager` exactly as instance methods.
+
+```typescript
+const config = new ScopedConfigManager();
+config.Register('PORT', z.coerce.number(), 3000);
+await config.RegisterProvider(myProvider);
+const port = config.Get('PORT'); // 3000
+```
+
+`ScopedConfigManager` exposes: `Register`, `Get`, `Set`, `GetSchema`, `RegisterProvider`, `RegisterSyncProvider`, `Save`, `RegisterNamespace`, `SetValidationWarningHandler`, `Reset`.
+
+---
+
+### `ConfigProvider` (abstract base class)
+
+Extend this class to build a custom provider. Both `Load` and `Save` are abstract and must be implemented.
+
+```typescript
+abstract class ConfigProvider<
+    TOptions extends TConfigProviderOptions = TConfigProviderOptions,
+    TLoadOptions = unknown,
+    TSaveOptions extends TConfigProviderSaveOptions = TConfigProviderSaveOptions
+> {
+    readonly Name: string
+    abstract Load(options?: TLoadOptions): Promise<Record<string, unknown>>
+    abstract Save(entries: readonly ConfigSaveEntry[], options?: TSaveOptions): Promise<void>
 }
-ConfigManager.RegisterSyncProvider(new MySyncProvider());
 ```
 
-### Precedence
+```typescript
+import { ConfigProvider, type TConfigProviderOptions, type ConfigSaveEntry } from '@pawells/config';
 
+class RedisProvider extends ConfigProvider {
+    async Load(): Promise<Record<string, unknown>> {
+        // Return a flat key-value record; keys must be fully qualified.
+        return { APP_HOST: 'redis-host' };
+    }
+
+    async Save(_entries: readonly ConfigSaveEntry[]): Promise<void> {
+        // Implement if this provider supports writes.
+    }
+}
 ```
-DEFAULT  →  providers (registration order)  →  OVERRIDE
-              ↑ ConfigEnvironmentProvider
-              ↑ ConfigJSONProvider
+
+---
+
+### Provider interfaces
+
+**`IConfigProvider`** — async providers (preferred):
+
+```typescript
+interface IConfigProvider {
+    readonly Name: string
+    Load(): Promise<Record<string, unknown>>
+    Save(entries: readonly ConfigSaveEntry[], options?: SaveOptions): Promise<void>
+}
 ```
 
-Later-registered providers win over earlier ones for the same key.
+**`ISyncConfigProvider`** — synchronous read-only providers (escape hatch):
 
-### Error Types
+```typescript
+interface ISyncConfigProvider {
+    readonly Name: string
+    LoadSync(): Record<string, unknown>
+}
+```
 
-| Error                          | When thrown                                                    |
-| ------------------------------ | -------------------------------------------------------------- |
-| `ConfigRegistrationError`      | Registering a key that already exists with a different schema. |
-| `ConfigNotRegisteredError`     | Accessing a key with no registered schema.                     |
-| `ConfigNotSetError`            | Getting a value that was never set.                            |
-| `ConfigValidationError`        | Validation failure; wraps the Zod error as `cause`.            |
-| `ConfigError`                  | Base error class for all config errors.                         |
+---
 
-### Type Exports
+### `SaveOptions`
 
-| Type                      | Description                                                                                     |
-| ------------------------- | ----------------------------------------------------------------------------------------------- |
-| `TConfigValueTypes`       | `string \| number \| boolean \| Date \| string[] \| number[] \| boolean[] \| undefined \| null` |
-| `TConfig`                 | `Map<string, TConfigValueTypes>`                                                                |
-| `TConfigSource`           | `'DEFAULT' \| 'OVERRIDE'`                                                                       |
-| `IConfigProvider`         | Async contract for config source providers (`Load()` and `Save()` both return `Promise`).       |
-| `ISaveableConfigProvider` | Extends `IConfigProvider` with async `Save()` method.                                           |
-| `ISyncConfigProvider`     | Sync escape hatch: `LoadSync()` returns `Record<string, unknown>` (no Save).                    |
-| `ConfigSaveEntry`         | Per-key data object passed to `provider.Save()`.                                                |
-| `SaveOptions`             | `{ path: string; useCurrentValues?: boolean }`                                                  |
-| `Secret<T>(schema)`       | Mark a Zod field as sensitive; affects `Redact()` and template-mode saves.                      |
+Passed to `ConfigManager.Save` and `IConfigProvider.Save`:
 
-> **⚠️ Security Warning**
->
-> Do not store sensitive values (API keys, database passwords, tokens, PII) directly as string literals in your code. Always load sensitive configuration from environment variables or secure vaults at startup.
->
-> When storing environment variable overrides, ensure the process environment itself is protected from inspection (e.g., via debugger or memory dumps).
->
-> Example:
->
-> ```typescript
-> // ✓ Good: Load from environment at startup
-> const db = RegisterConfigSchema(
->   'DB',
->   z.object({
->     PASSWORD: Secret(z.string().default('')),
->   }),
-> );
->
-> // ✗ Bad: Hardcoded secrets
-> ConfigManager.Register('DB_PASSWORD', z.string(), 'hardcoded-password');
-> ```
+```typescript
+interface SaveOptions {
+    path: string              // Destination file path
+    useCurrentValues?: boolean // false (default) = registered defaults; true = live resolved values
+}
+```
+
+---
+
+### `ConfigSaveEntry` / `IConfigSaveEntry`
+
+One entry per registered key, built by `ConfigManager.Save` and passed to `provider.Save`:
+
+| Field | Type | Description |
+|---|---|---|
+| `key` | `string` | Fully-qualified key (e.g. `DATABASE_HOST`) |
+| `section` | `string` | Namespace section (e.g. `DATABASE`); empty string if no namespace |
+| `field` | `string` | Field within the section (e.g. `HOST`); equals `key` when section is empty |
+| `value` | `unknown` | Default or live value, depending on `useCurrentValues` |
+| `isSecret` | `boolean` | `true` if the field was wrapped with `Secret()` |
+| `description` | `string \| undefined` | From Zod `.describe()` annotation |
+
+---
+
+### Error classes
+
+All errors extend `ConfigError`, which in turn extends `BaseError` from `@pawells/typescript-common`.
+
+| Class | Error code | Thrown when |
+|---|---|---|
+| `ConfigError` | `CONFIG_ERROR` | General configuration error; base class for all others |
+| `ConfigRegistrationError` | `CONFIG_REGISTRATION_ERROR` | A key is registered a second time with a different schema |
+| `ConfigNotSetError` | `CONFIG_NOT_SET_ERROR` | `Get()` is called for a key with no value in the requested tier |
+| `ConfigNotRegisteredError` | `CONFIG_NOT_REGISTERED` | `Get()`, `Set()`, or `GetSchema()` is called for an unregistered key |
+| `ConfigValidationError` | `CONFIG_VALIDATION_ERROR` | A value fails its Zod schema at `Register()`, `Set()`, or `Get()` time |
+
+```typescript
+import { ConfigError, ConfigNotRegisteredError, ConfigNotSetError, ConfigValidationError } from '@pawells/config';
+
+try {
+    const value = ConfigManager.Get('MISSING_KEY');
+} catch (error) {
+    if (error instanceof ConfigNotRegisteredError) {
+        // Key was never registered
+    } else if (error instanceof ConfigNotSetError) {
+        // Key is registered but has no value in the requested tier
+    } else if (error instanceof ConfigValidationError) {
+        // Value failed schema validation; check error.cause for Zod details
+    } else if (error instanceof ConfigError) {
+        // Any other configuration error
+    }
+}
+```
+
+---
+
+### Schema constants and utilities
+
+| Export | Description |
+|---|---|
+| `CONFIG_VALUES_TYPES_SCHEMA` | Zod union schema accepting all supported config value types |
+| `AssertConfigValueType(value)` | Asserts that `value` is a `TConfigValueTypes`; throws `ZodError` otherwise |
+| `CONFIG_PROVIDER_OPTIONS_SCHEMA` | Zod schema for `{ name: string }` base provider options |
+| `TConfigProviderOptions` | Inferred type of `CONFIG_PROVIDER_OPTIONS_SCHEMA` |
+| `AssertConfigProviderOptions(options)` | Asserts conformance; throws `ZodError` otherwise |
+| `ValidateConfigProviderOptions(options)` | Returns `true` if options conform; `false` otherwise |
+| `CONFIG_PROVIDER_SAVE_OPTIONS_SCHEMA` | Zod schema for `{ useCurrentValues?: boolean }` |
+| `TConfigProviderSaveOptions` | Inferred type of `CONFIG_PROVIDER_SAVE_OPTIONS_SCHEMA` |
 
 ## License
 
