@@ -1,7 +1,7 @@
 import { promises as FS } from 'node:fs';
 import * as PATH from 'node:path';
 import { z } from 'zod/v4';
-import { ConfigProvider, CONFIG_PROVIDER_OPTIONS_SCHEMA, CONFIG_PROVIDER_SAVE_OPTIONS_SCHEMA, type ConfigSaveEntry, ConfigManager } from '@pawells/config';
+import { ConfigProvider, CONFIG_PROVIDER_OPTIONS_SCHEMA, CONFIG_PROVIDER_SAVE_OPTIONS_SCHEMA, type ConfigSaveEntry, ConfigManager, ConfigError } from '@pawells/config';
 import { ParseEnvVarValue, ParseDotEnvFileAsync, SerializeConfigValue } from './env-utils.js';
 
 /**
@@ -178,11 +178,15 @@ export class ConfigEnvironmentProvider extends ConfigProvider<TConfigENVProvider
 	 * reads the dotenv file and overwrites any overlapping keys. All values are passed
 	 * through {@link ParseEnvVarValue} before being returned.
 	 *
-	 * If the dotenv file cannot be read for any reason (missing file, permission denied, etc.),
-	 * the file is skipped and only environment variables are returned. File errors are logged
-	 * via `console.warn` for diagnostic purposes.
+	 * If the dotenv file is missing or cannot be read due to permission errors or other
+	 * file system issues, the file is silently skipped and only environment variables are
+	 * returned. The dotenv file is optional and its absence or read failure does not prevent
+	 * configuration loading.
+	 *
+	 * Security rejections (symlink detection, path traversal) are propagated as errors.
 	 *
 	 * @returns A record of fully-qualified config key names to their parsed values
+	 * @throws {ConfigError} When the dotenv path is a symlink or contains path traversal sequences
 	 *
 	 * @example
 	 * ```typescript
@@ -213,13 +217,12 @@ export class ConfigEnvironmentProvider extends ConfigProvider<TConfigENVProvider
 				}
 			}
 			catch (error: unknown) {
-				// Safely check if error is a file-not-found (ENOENT) error
-				const isNotFound = error instanceof Error && 'code' in error && (error as { code?: string }).code === 'ENOENT';
-				if (!isNotFound) {
-					// Log non-ENOENT errors for diagnostic purposes; generic message avoids leaking paths
-					// eslint-disable-next-line no-console
-					console.warn('[ConfigEnvironmentProvider] Failed to read dotenv file.');
+				// Re-throw ConfigError (security rejections: symlink, path traversal)
+				if (error instanceof ConfigError) {
+					throw error;
 				}
+				// Silently skip other file errors (ENOENT, EACCES, etc.);
+				// dotenv is optional and fallback uses process.env values already collected
 			}
 		}
 

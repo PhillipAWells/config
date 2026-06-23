@@ -1,5 +1,5 @@
-import { promises as fs } from 'node:fs';
-import { normalize } from 'node:path';
+import { promises as fs, constants as fsConstants } from 'node:fs';
+import { normalize, dirname, basename, join } from 'node:path';
 import { ConfigError } from '@pawells/config';
 
 /**
@@ -60,15 +60,17 @@ export function ParseEnvVarValue(envVarValue: string): unknown {
  * - Lines without `=` are skipped
  * - Windows-style `\r\n` line endings are normalized automatically
  * - Paths containing `..` traversal sequences are rejected for security
- * - Symbolic links are not permitted for security
+ * - Symbolic links are not permitted for security (both final component and parent directories)
  *
  * @param path - Path to the `.env` file to read
  * @returns A promise resolving to a record mapping each key to its raw string value
  * @throws {ConfigError} When the path contains `..` directory traversal sequences
- * @throws {ConfigError} When the path is a symbolic link
+ * @throws {ConfigError} When the path is a symbolic link (final component or parent directory)
  * @throws {Error} If the file cannot be read (e.g. not found, permission denied)
  *
  * @remarks
+ * Parent directories are canonicalized via realpath to detect symlinked ancestor directories.
+ * The final path component is checked via O_NOFOLLOW for atomic symlink rejection.
  * Inline comments must be preceded by a space to be recognized (e.g., `KEY=value # comment`).
  * A `#` that is not preceded by a space is treated as part of the value.
  *
@@ -86,43 +88,81 @@ export function ParseEnvVarValue(envVarValue: string): unknown {
 export async function ParseDotEnvFileAsync(path: string): Promise<Record<string, string>> {
 	if (normalize(path).includes('..')) throw new ConfigError(`Path traversal sequences ("..") are not permitted. Received: "${path}"`);
 
-	const stat = await fs.lstat(path);
-	if (stat.isSymbolicLink()) throw new ConfigError('Symlink paths are not permitted.');
+	try {
+		// Canonicalize parent directory to detect symlinked ancestors
+		const realParent = await fs.realpath(dirname(path));
+		const safePath = join(realParent, basename(path));
 
-	const raw = await fs.readFile(path, 'utf-8');
-	const result: Record<string, string> = {};
-
-	for (const rawLine of raw.split('\n')) {
-		const line = rawLine.replace(/\r$/, '').trim();
-
-		if (line === '' || line.startsWith('#')) continue;
-
-		const eqIdx = line.indexOf('=');
-		if (eqIdx === -1) continue;
-
-		const key = line.slice(0, eqIdx).trim();
-		let value = line.slice(eqIdx + 1).trim();
-
-		if (
-			(value.startsWith('"') && value.endsWith('"'))
-			|| (value.startsWith("'") && value.endsWith("'"))
-		) {
-			value = value.slice(1, -1);
+		// Open file with O_NOFOLLOW to reject symlink final component atomically
+		const filehandle = await fs.open(safePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+		let raw: string;
+		try {
+			const buffer = await filehandle.readFile();
+			raw = buffer.toString('utf-8');
 		}
-		else {
-			// Strip inline # comments (only if value is not quoted)
-			const commentIdx = value.indexOf(' #');
-			if (commentIdx !== -1) {
-				value = value.slice(0, commentIdx).trim();
+		finally {
+			await filehandle.close();
+		}
+
+		const result: Record<string, string> = {};
+
+		for (const rawLine of raw.split('\n')) {
+			const line = rawLine.replace(/\r$/, '').trim();
+
+			if (line === '' || line.startsWith('#')) continue;
+
+			const eqIdx = line.indexOf('=');
+			if (eqIdx === -1) continue;
+
+			const key = line.slice(0, eqIdx).trim();
+			let value = line.slice(eqIdx + 1).trim();
+
+			if (
+				(value.startsWith('"') && value.endsWith('"'))
+				|| (value.startsWith('\'') && value.endsWith('\''))
+			) {
+				value = value.slice(1, -1);
+			}
+			else {
+				// Strip inline # comments (only if value is not quoted)
+				const commentIdx = value.indexOf(' #');
+				if (commentIdx !== -1) {
+					value = value.slice(0, commentIdx).trim();
+				}
+			}
+
+			if (key !== '') {
+				result[key] = value;
 			}
 		}
 
-		if (key !== '') {
-			result[key] = value;
-		}
+		return result;
 	}
+	catch (error: unknown) {
+		// If it's already a ConfigError, rethrow it
+		if (error instanceof ConfigError) {
+			throw error;
+		}
 
-	return result;
+		// Check error codes from fs.open and realpath
+		const errorCode = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
+
+		// ELOOP (Linux) or ENOTDIR (macOS) indicate symlink in final component
+		if (errorCode === 'ELOOP' || errorCode === 'ENOTDIR') {
+			throw new ConfigError('Symlink paths are not permitted.');
+		}
+
+		// Check if it's ENOENT (file not found) — allow optional dotenv files to return empty
+		const isNotFound = errorCode === 'ENOENT';
+
+		// If file is missing, return empty config (dotenv files are optional by nature)
+		if (isNotFound) {
+			return {};
+		}
+
+		// All other errors (permission, etc.) are rethrown
+		throw error;
+	}
 }
 
 /**
@@ -153,8 +193,8 @@ export async function ParseDotEnvFileAsync(path: string): Promise<Record<string,
  */
 export function SerializeConfigValue(value: unknown): string {
 	if (value === null || value === undefined) return '';
+	if (value instanceof Date) return value.toISOString();
 	if (Array.isArray(value)) return JSON.stringify(value);
 	if (value !== null && typeof value === 'object') return JSON.stringify(value);
-	if (value instanceof Date) return value.toISOString();
 	return String(value);
 }

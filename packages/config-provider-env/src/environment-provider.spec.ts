@@ -1,8 +1,9 @@
-import type { ParseDotEnvFileAsync } from './env-utils.js';
 import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { ConfigError } from '@pawells/config';
+import type { ParseDotEnvFileAsync } from './env-utils.js';
 import { ConfigEnvironmentProvider, AssertConfigENVProviderOptions, ValidateConfigENVProviderOptions, AssertConfigENVProviderSaveOptions, ValidateConfigENVProviderSaveOptions } from './environment-provider.js';
 
 let mockParseDotEnvFileAsync: ((path: string) => Promise<Record<string, string>>) | undefined;
@@ -158,9 +159,8 @@ describe('ConfigEnvironmentProvider', () => {
 			expect(values?.['PROCESS_ONLY_KEY']).toBe('process-val');
 		});
 
-		it('permission denied (EACCES): logs warning and returns process.env values', async () => {
+		it('permission denied (EACCES): silently skips and returns process.env values', async () => {
 			backupAndSet('PROCESS_VAR', 'from-process');
-			const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
 			// Mock ParseDotEnvFileAsync to throw EACCES error
 			mockParseDotEnvFileAsync = vi.fn(() => {
@@ -173,13 +173,9 @@ describe('ConfigEnvironmentProvider', () => {
 
 			// Should include the process.env variable and not crash
 			expect(values?.['PROCESS_VAR']).toBe('from-process');
-			expect(warnSpy).toHaveBeenCalledOnce();
-			// Assert that the warning message does NOT contain the file path (sanitized)
-			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('[ConfigEnvironmentProvider]'));
-			expect(warnSpy).toHaveBeenCalledWith(expect.not.stringContaining('/some/path'));
+			expect(typeof values).toBe('object');
 
 			mockParseDotEnvFileAsync = undefined;
-			warnSpy.mockRestore();
 		});
 	});
 
@@ -436,29 +432,39 @@ describe('ConfigEnvironmentProvider', () => {
 		});
 	});
 
-	describe('Load() error handling with sanitized error messages', () => {
-		it('logs warning without path when dotenv read fails', async () => {
-			const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-
+	describe('Load() error handling with file read failures', () => {
+		it('silently skips read errors and returns process.env values', async () => {
 			mockParseDotEnvFileAsync = vi.fn(() => {
 				const err = new Error('Some read error');
 				throw err;
 			});
 
+			// Set a known env var to verify Load() returns process.env values
+			backupAndSet('TEST_EP_KNOWN_VAR', 'x');
+
 			const filePath = '/secret/sensitive/path/.env';
 			const provider = new ConfigEnvironmentProvider({ name: 'test', path: filePath });
 			const result = await provider.Load();
 
-			expect(warnSpy).toHaveBeenCalledOnce();
-			const callArg = warnSpy.mock.calls[0][0];
-			expect(callArg).toContain('[ConfigEnvironmentProvider]');
-			expect(callArg).not.toContain('/secret/sensitive/path');
-			expect(callArg).not.toContain('.env');
-			// Should still return an object (process.env values)
+			// Should return an object (process.env values) without throwing
 			expect(typeof result).toBe('object');
+			expect(result?.['TEST_EP_KNOWN_VAR']).toBe('x');
 
 			mockParseDotEnvFileAsync = undefined;
-			warnSpy.mockRestore();
+		});
+
+		it('re-throws ConfigError (symlink or path-traversal security rejection)', async () => {
+			mockParseDotEnvFileAsync = vi.fn(() => {
+				throw new ConfigError('Symlink paths are not permitted.');
+			});
+
+			const filePath = '/some/path/.env';
+			const provider = new ConfigEnvironmentProvider({ name: 'test', path: filePath });
+
+			// Should reject with ConfigError
+			await expect(provider.Load()).rejects.toThrow(ConfigError);
+
+			mockParseDotEnvFileAsync = undefined;
 		});
 	});
 

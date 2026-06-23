@@ -1,4 +1,4 @@
-import { writeFileSync, unlinkSync, existsSync, symlinkSync } from 'node:fs';
+import { writeFileSync, unlinkSync, existsSync, symlinkSync, readdirSync, rmdirSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -126,11 +126,10 @@ describe('SerializeConfigValue', () => {
 		expect(result).toBe('-3.14');
 	});
 
-	it('serializes Date as JSON string (Date is object type)', () => {
+	it('serializes Date as bare ISO string', () => {
 		const date = new Date('2024-01-01T00:00:00.000Z');
 		const result = SerializeConfigValue(date);
-		// Date is an object, so it gets JSON.stringify'd before the Date instanceof check is reached
-		expect(result).toBe(JSON.stringify(date));
+		expect(result).toBe('2024-01-01T00:00:00.000Z');
 	});
 
 	it('serializes array to JSON: [\'a\', \'b\'] → \'["a","b"]\'', () => {
@@ -348,6 +347,57 @@ describe('ParseDotEnvFileAsync', () => {
 			finally {
 				if (existsSync(realFile)) unlinkSync(realFile);
 				if (existsSync(symlinkFile)) unlinkSync(symlinkFile);
+			}
+		});
+
+		it('resolves files through a symlinked parent directory (realpath canonicalization)', async () => {
+			// Create a real directory with a .env file, then symlink to it
+			const timestamp = Date.now();
+			const realDir = join(tmpDir, `real-dir-${timestamp}`);
+			const symlinkDir = join(tmpDir, `symlink-dir-${timestamp}`);
+			const envFilePath = join(symlinkDir, `test-${timestamp}.env`);
+
+			try {
+				// Create real directory and .env file
+				mkdirSync(realDir, { recursive: true });
+				const realEnvFile = join(realDir, `test-${timestamp}.env`);
+				writeFileSync(realEnvFile, 'KEY=value', 'utf-8');
+
+				// Create symlink to the real directory
+				symlinkSync(realDir, symlinkDir, 'dir');
+
+				// Access the file through the symlinked parent directory
+				const result = await ParseDotEnvFileAsync(envFilePath);
+
+				// Should resolve successfully and return parsed contents
+				expect(result).toEqual({ KEY: 'value' });
+			}
+			finally {
+				// Cleanup: unlink symlink first, then remove real file, then real directory
+				try {
+					if (existsSync(symlinkDir)) unlinkSync(symlinkDir);
+				}
+				catch {
+					// ignore
+				}
+				try {
+					const realEnvFile = join(realDir, `test-${timestamp}.env`);
+					if (existsSync(realEnvFile)) unlinkSync(realEnvFile);
+				}
+				catch {
+					// ignore
+				}
+				try {
+					if (existsSync(realDir)) {
+						const files = readdirSync(realDir);
+						if (files.length === 0) {
+							rmdirSync(realDir);
+						}
+					}
+				}
+				catch {
+					// ignore
+				}
 			}
 		});
 	});
