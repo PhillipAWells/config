@@ -15,7 +15,7 @@ Primary reference for all AI agents working in this repository. CLAUDE.md delega
 
 ### Packages
 
-All packages are at v2.4.0, `"type": "module"` (ESM only), Node >=22.0.0.
+All packages are at v3.0.0, `"type": "module"` (ESM only), Node >=22.0.0.
 
 | NX project name | npm package | Description |
 |---|---|---|
@@ -176,7 +176,6 @@ packages/<name>/
 │   ├── index.ts            # Public exports
 │   ├── <module>.ts         # Implementation
 │   └── <module>.spec.ts    # Co-located tests
-├── CHANGELOG.md
 ├── LICENSE
 ├── package.json
 ├── project.json            # NX per-package targets (publish, clean)
@@ -291,7 +290,7 @@ Coverage output is written to `./test-output/vitest/coverage` within each packag
 | Branch | Purpose |
 |---|---|
 | `main` | Protected default branch; only merged into via squash PR |
-| `development/*` | Active development (current: `development/2.4`) |
+| `development/*` | Active development (current: `development/3.0`) |
 
 Do not commit directly to `main`.
 
@@ -333,6 +332,15 @@ Squash merge only. All commits on a PR are squashed into a single commit on `mai
 
 Tags in the format `v<semver>` (e.g., `v2.4.0`) trigger the publish pipeline. Do not create version tags manually unless publishing is intended.
 
+### GitHub Actions Version Pinning
+
+GitHub Actions in CI/CD workflows (`.github/workflows/*.yml`) MUST be pinned to the **latest major version tags** (e.g. `actions/checkout@v6`, `actions/setup-node@v6`). Do NOT pin actions to full commit SHAs.
+
+- Keeps workflow files readable and maintainable.
+- Major-tag pins automatically receive patch/minor updates (including security fixes) from the action publisher.
+- Dependabot (github-actions ecosystem) manages major version bumps via PRs, so SHA pinning is unnecessary.
+- Always use the latest available major version tag for each action.
+
 ---
 
 ## 7. Development Workflow & When Stuck
@@ -364,7 +372,7 @@ A breaking change is any modification that:
 - Raises the minimum Node version
 - Changes the module format
 
-Breaking changes require a major version bump and a `CHANGELOG.md` entry under a new version heading.
+Breaking changes require a major version bump.
 
 ### When Stuck
 
