@@ -1,0 +1,44 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      eslint:
+        patterns:
+          - "@eslint/*"
+          - "@stylistic/*"
+          - "@typescript-eslint/*"
+          - "eslint*"
+          - "globals"
+      vitest:
+        patterns:
+          - "@vitest/*"
+          - "vitest"
+      typescript:
+        patterns:
+          - "typescript"
+          - "@types/*"
+        update-types:
+          - "patch"
+      nx:
+        patterns:
+          - "nx"
+          - "@nx/*"
+          - "@swc-node/*"
+          - "@swc/*"
+      actions:
+        patterns:
+          - "*"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"

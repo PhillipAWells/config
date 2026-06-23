@@ -1,0 +1,28 @@
+{
+	"name": "@pawells/config-provider-env",
+	"metadata": {
+		"description": "Environment variable and dotenv file configuration provider for @pawells/config"
+	},
+	"tags": [
+		"npm:public"
+	],
+	"targets": {
+		"publish": {
+			"executor": "nx:run-commands",
+			"options": {
+				"command": "npm publish --provenance --access public",
+				"cwd": "{projectRoot}"
+			},
+			"dependsOn": [
+				"build"
+			]
+		},
+		"clean": {
+			"executor": "nx:run-commands",
+			"options": {
+				"command": "rm -rf dist tsconfig.*.tsbuildinfo",
+				"cwd": "{projectRoot}"
+			}
+		}
+	}
+}

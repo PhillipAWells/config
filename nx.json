@@ -1,0 +1,127 @@
+{
+	"$schema": "./node_modules/nx/schemas/nx-schema.json",
+	"sync": {
+		"applyChanges": false
+	},
+	"namedInputs": {
+		"default": [
+			"{projectRoot}/**/*",
+			"sharedGlobals"
+		],
+		"production": [
+			"default",
+			"!{projectRoot}/.eslintrc.json",
+			"!{projectRoot}/eslint.config.mjs",
+			"!{projectRoot}/**/?(*.)+(spec|test).[jt]s?(x)?(.snap)",
+			"!{projectRoot}/tsconfig.spec.json"
+		],
+		"sharedGlobals": []
+	},
+	"plugins": [
+		{
+			"plugin": "@nx/js/typescript",
+			"options": {
+				"typecheck": {
+					"targetName": "typecheck"
+				},
+				"build": {
+					"targetName": "build",
+					"configName": "tsconfig.lib.json",
+					"buildDepsName": "build-deps",
+					"watchDepsName": "watch-deps"
+				}
+			}
+		},
+		{
+			"plugin": "@nx/eslint/plugin",
+			"options": {
+				"targetName": "lint"
+			}
+		},
+		{
+			"plugin": "@nx/vitest",
+			"options": {
+				"testTargetName": "test",
+				"ciTargetName": "test-ci",
+				"testMode": "run"
+			}
+		}
+	],
+	"neverConnectToCloud": true,
+	"disableDaemon": true,
+	"analytics": false,
+	"release": {
+		"projects": [
+			"packages/*"
+		],
+		"version": {
+			"preVersionCommand": "yarn dlx nx run-many -t build",
+			"git": {
+				"commit": true,
+				"tag": false
+			}
+		},
+		"changelog": {
+			"workspaceChangelog": false,
+			"projectChangelogs": false
+		}
+	},
+	"targetDefaults": {
+		"test": {
+			"dependsOn": [
+				"^build"
+			],
+			"options": {
+				"pool": "forks",
+				"poolOptions": {
+					"forks": {
+						"maxForks": 2,
+						"minForks": 1
+					}
+				},
+				"fileParallelism": false,
+				"coverage": false
+			},
+			"configurations": {
+				"coverage": {
+					"coverage": true
+				}
+			}
+		},
+		"test:coverage": {
+			"dependsOn": [
+				"^build"
+			],
+			"options": {
+				"pool": "forks",
+				"poolOptions": {
+					"forks": {
+						"maxForks": 2,
+						"minForks": 1
+					}
+				},
+				"fileParallelism": false,
+				"coverage": true
+			}
+		},
+		"typecheck": {
+			"inputs": [
+				"default",
+				"^production",
+				{
+					"externalDependencies": [
+						"typescript"
+					]
+				}
+			],
+			"outputs": [
+				"{projectRoot}/dist/tsconfig.lib.tsbuildinfo",
+				"{projectRoot}/out-tsc/vitest/tsconfig.spec.tsbuildinfo",
+				"{projectRoot}/tsconfig.tsbuildinfo"
+			]
+		}
+	},
+	"tui": {
+		"enabled": false
+	}
+}

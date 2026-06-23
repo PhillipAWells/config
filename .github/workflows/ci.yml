@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'development/*']
+    tags-ignore: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_call:
+
+concurrency:
+  group: CI-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  nx-build-pipeline:
+    name: NX Build Pipeline
+    runs-on: ubuntu-latest
+    env:
+      HUSKY: '0'
+      NX_DAEMON: 'false'
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Enable corepack
+        run: corepack enable && COREPACK_ENABLE_STRICT=0 corepack prepare yarn@stable --activate
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'yarn'
+
+      - name: Install Dependencies
+        run: yarn install --immutable
+
+      - name: Typecheck
+        run: yarn nx run-many --target=typecheck --all
+
+      - name: Lint
+        run: yarn nx run-many --target=lint --all
+
+      - name: Test with Coverage
+        run: yarn nx run-many --target=test --all -- --coverage
+
+      - name: Build
+        run: yarn nx run-many --target=build --all

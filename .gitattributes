@@ -1,0 +1,105 @@
+# Normalize line endings to LF on all platforms
+* text=auto eol=lf
+
+# ── Source & config — explicitly text ──────────────────────────────────────
+*.ts    text eol=lf
+*.tsx   text eol=lf
+*.js    text eol=lf
+*.jsx   text eol=lf
+*.cjs   text eol=lf
+*.mjs   text eol=lf
+*.mts   text eol=lf
+*.cts   text eol=lf
+*.json  text eol=lf
+*.jsonc text eol=lf
+*.md    text eol=lf
+*.mdx   text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.html  text eol=lf
+*.css   text eol=lf
+*.scss  text eol=lf
+*.svg   text eol=lf
+*.sh    text eol=lf eol=lf
+*.env   text eol=lf
+
+# ── Binary — Video ─────────────────────────────────────────────────────────
+# Note: .ts and .mts are excluded — used as TypeScript source extensions
+*.mp4  binary
+*.mov  binary
+*.avi  binary
+*.mkv  binary
+*.webm binary
+*.flv  binary
+*.wmv  binary
+*.m4v  binary
+*.ogv  binary
+*.3gp  binary
+*.3g2  binary
+
+# ── Binary — Audio ─────────────────────────────────────────────────────────
+*.mp3  binary
+*.wav  binary
+*.flac binary
+*.aac  binary
+*.ogg  binary
+*.m4a  binary
+*.wma  binary
+*.aiff binary
+*.aif  binary
+*.opus binary
+
+# ── Binary — Raster images ─────────────────────────────────────────────────
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.bmp  binary
+*.tiff binary
+*.tif  binary
+*.webp binary
+*.heic binary
+*.heif binary
+*.ico  binary
+
+# ── Binary — Camera raw ────────────────────────────────────────────────────
+*.raw  binary
+*.cr2  binary
+*.cr3  binary
+*.nef  binary
+*.arw  binary
+*.dng  binary
+
+# ── Binary — Design source files ──────────────────────────────────────────
+*.psd    binary
+*.psb    binary
+*.ai     binary
+*.indd   binary
+*.sketch binary
+*.fig    binary
+*.xd     binary
+
+# ── Binary — Fonts ─────────────────────────────────────────────────────────
+*.ttf   binary
+*.otf   binary
+*.woff  binary
+*.woff2 binary
+*.eot   binary
+
+# ── Binary — 3D & animation ────────────────────────────────────────────────
+*.blend binary
+*.fbx   binary
+*.glb   binary
+*.gltf  binary
+*.dae   binary
+*.obj   binary
+*.3ds   binary
+*.abc   binary
+
+# ── Binary — Documents & archives ─────────────────────────────────────────
+*.pdf  binary
+*.zip  binary
+*.tar  binary
+*.gz   binary
+*.bz2  binary
+*.7z   binary

@@ -1,0 +1,69 @@
+{
+	"name": "@pawells/config-workspace",
+	"license": "MIT",
+	"private": true,
+	"author": {
+		"name": "Phillip Aaron Wells",
+		"email": "69355326+PhillipAWells@users.noreply.github.com"
+	},
+	"homepage": "https://github.com/PhillipAWells/config",
+	"bugs": {
+		"url": "https://github.com/PhillipAWells/config/issues"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/PhillipAWells/config.git"
+	},
+	"funding": {
+		"type": "github",
+		"url": "https://github.com/sponsors/PhillipAWells"
+	},
+	"scripts": {
+		"typecheck": "yarn nx run-many --target=typecheck --all",
+		"lint": "yarn nx run-many --target=lint --all",
+		"test": "yarn nx run-many --target=test --all",
+		"test:coverage": "yarn nx run-many --target=test --all -- --coverage",
+		"build": "yarn nx run-many --target=build --all",
+		"clean": "yarn nx run-many --target=clean --all",
+		"prepare": "husky"
+	},
+	"devDependencies": {
+		"@eslint/js": "^10.0.1",
+		"@nx/devkit": "23.0.1",
+		"@nx/eslint": "23.0.1",
+		"@nx/eslint-plugin": "23.0.1",
+		"@nx/js": "23.0.1",
+		"@nx/vite": "23.0.1",
+		"@nx/vitest": "23.0.1",
+		"@stylistic/eslint-plugin": "^5.10.0",
+		"@types/node": "^24.13.2",
+		"@typescript-eslint/parser": "^8.62.0",
+		"@vitest/coverage-v8": "~4.1.0",
+		"eslint": "^10.5.0",
+		"husky": "^9.1.7",
+		"jsonc-eslint-parser": "^3.1.0",
+		"nx": "23.0.1",
+		"typescript": "~6.0.0",
+		"typescript-eslint": "^8.62.0",
+		"verdaccio": "^6.7.4",
+		"vite": "^8.1.0",
+		"vitest": "~4.1.0"
+	},
+	"workspaces": [
+		"packages/*"
+	],
+	"packageManager": "yarn@4.17.0",
+	"nx": {
+		"includedScripts": [],
+		"targets": {
+			"local-registry": {
+				"executor": "@nx/js:verdaccio",
+				"options": {
+					"port": 4873,
+					"config": ".verdaccio/config.yml",
+					"storage": "tmp/local-registry/storage"
+				}
+			}
+		}
+	}
+}
