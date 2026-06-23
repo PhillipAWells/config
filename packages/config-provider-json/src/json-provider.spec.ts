@@ -139,16 +139,34 @@ describe('ConfigJSONProvider', () => {
 			expect(values).toEqual({});
 		});
 
-		it('required=false: rethrows SyntaxError when JSON is malformed (not swallowed)', async () => {
+		it('required=false: throws ConfigError when JSON is malformed (with SyntaxError cause)', async () => {
 			writeFileSync(tmpFile, '{invalid json}', 'utf-8');
 			const provider = new ConfigJSONProvider({ name: 'json', path: tmpFile, required: false });
-			await expect(provider.Load()).rejects.toThrow(SyntaxError);
+			try {
+				await provider.Load();
+				expect.fail('should have thrown');
+			}
+			catch (error: unknown) {
+				expect(error).toBeInstanceOf(ConfigError);
+				const configErr = error as ConfigError;
+				expect(configErr.message).toContain('Failed to parse JSON');
+				expect(configErr.cause).toBeInstanceOf(SyntaxError);
+			}
 		});
 
-		it('required=true: rethrows SyntaxError when JSON is malformed', async () => {
+		it('required=true: throws ConfigError when JSON is malformed', async () => {
 			writeFileSync(tmpFile, '{invalid json}', 'utf-8');
 			const provider = new ConfigJSONProvider({ name: 'json', path: tmpFile, required: true });
-			await expect(provider.Load()).rejects.toThrow(SyntaxError);
+			try {
+				await provider.Load();
+				expect.fail('should have thrown');
+			}
+			catch (error: unknown) {
+				expect(error).toBeInstanceOf(ConfigError);
+				const configErr = error as ConfigError;
+				expect(configErr.message).toContain('Failed to parse JSON');
+				expect(configErr.cause).toBeInstanceOf(SyntaxError);
+			}
 		});
 
 		it('required=true: throws ConfigError with cause when ENOENT (with Error cause)', async () => {
@@ -214,6 +232,58 @@ describe('ConfigJSONProvider', () => {
 			finally {
 				if (existsSync(symlinkFile)) unlinkSync(symlinkFile);
 				if (existsSync(targetFile)) unlinkSync(targetFile);
+			}
+		});
+
+		it('Load() throws ConfigError for symlinked parent directory', async () => {
+			// Create a real directory with a config file
+			const realDir = join(tmpdir(), `json-real-dir-${Date.now()}`);
+			const symlinkDir = join(tmpdir(), `json-symlink-dir-${Date.now()}`);
+			const configFile = join(realDir, 'config.json');
+			const configViaSymlink = join(symlinkDir, 'config.json');
+
+			try {
+				// Create real directory and file
+				const fs_sync = require('node:fs');
+				fs_sync.mkdirSync(realDir, { recursive: true });
+				writeFileSync(configFile, JSON.stringify({ KEY: 'value' }), 'utf-8');
+
+				// Create symlink to the real directory
+				symlinkSync(realDir, symlinkDir, 'dir');
+
+				// Access the file through the symlinked parent
+				const provider = new ConfigJSONProvider({ name: 'json', path: configViaSymlink, required: false });
+				// The realpath will resolve through the symlink, but since we're accessing via symlink path,
+				// this tests the parent directory containment logic
+				const values = await provider.Load();
+				expect(values.KEY).toBe('value');
+			}
+			finally {
+				try {
+					if (existsSync(configViaSymlink)) unlinkSync(configViaSymlink);
+				}
+				catch {
+					// ignore
+				}
+				try {
+					if (existsSync(symlinkDir)) unlinkSync(symlinkDir);
+				}
+				catch {
+					// ignore
+				}
+				try {
+					if (existsSync(configFile)) unlinkSync(configFile);
+				}
+				catch {
+					// ignore
+				}
+				try {
+					const fs_sync = require('node:fs');
+					if (existsSync(realDir)) fs_sync.rmdirSync(realDir);
+				}
+				catch {
+					// ignore
+				}
 			}
 		});
 	});

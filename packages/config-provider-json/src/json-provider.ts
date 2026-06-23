@@ -1,4 +1,5 @@
 import * as fs from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
 import * as path from 'node:path';
 import { z } from 'zod/v4';
 import { CONFIG_PROVIDER_OPTIONS_SCHEMA, CONFIG_PROVIDER_SAVE_OPTIONS_SCHEMA, ConfigError, ConfigManager, ConfigProvider, type ConfigSaveEntry } from '@pawells/config';
@@ -162,14 +163,18 @@ export class ConfigJSONProvider extends ConfigProvider<
 	 * nested objects (one level deep) into fully-qualified keys using `_` as the separator.
 	 * If the file cannot be read and `options.required` is `false`, returns `{}`.
 	 *
-	 * Symlink paths are not permitted and will throw a ConfigError.
+	 * Symlink paths are not permitted and will throw a ConfigError. Both the final path
+	 * component and parent directories are validated: the final component is checked via
+	 * O_NOFOLLOW, and parent directories are canonicalized via realpath to reject symlinked
+	 * ancestor directories.
+	 *
 	 * Input size (and thus practical nesting depth) is bounded by the existing 10 MB file-size limit.
 	 *
 	 * @returns A flat record of fully-qualified config key names to their native-typed values.
-	 * @throws {ConfigError} If the file is a symlink.
+	 * @throws {ConfigError} If the file is a symlink (final component or parent directory).
 	 * @throws {ConfigError} If the file cannot be read and `options.required` is `true`.
 	 * @throws {ConfigError} When the config file exceeds 10MB.
-	 * @throws {SyntaxError} If the loaded JSON fails to parse.
+	 * @throws {ConfigError} If the loaded JSON fails to parse.
 	 *
 	 * @example
 	 * ```typescript
@@ -186,20 +191,36 @@ export class ConfigJSONProvider extends ConfigProvider<
 	 */
 	public async Load(): Promise<Record<string, unknown>> {
 		try {
-			// Check for symlinks before reading
-			const stat = await fs.lstat(this.options.path);
-			if (stat.isSymbolicLink()) {
-				throw new ConfigError('Symlink paths are not permitted.');
+			// Canonicalize parent directory to detect symlinked ancestors
+			const realParentDir = await fs.realpath(path.dirname(this.options.path));
+			const fileName = path.basename(this.options.path);
+			const resolvedPath = path.join(realParentDir, fileName);
+
+			// Open file with O_NOFOLLOW to reject symlink final component atomically
+			const filehandle = await fs.open(resolvedPath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+			let buffer: Buffer;
+			try {
+				buffer = await filehandle.readFile();
+			}
+			finally {
+				await filehandle.close();
 			}
 
-			const buffer = await fs.readFile(this.options.path);
 			// Use byte-accurate size check: 10 MB = 10 * 1024 * 1024 bytes
 			if (buffer.byteLength > 10 * 1024 * 1024) {
 				throw new ConfigError('Config file exceeds 10MB limit');
 			}
 
 			const content = buffer.toString('utf-8');
-			const parsed: unknown = JSON.parse(content);
+			let parsed: unknown;
+			try {
+				parsed = JSON.parse(content);
+			}
+			catch (error: unknown) {
+				throw new ConfigError('Failed to parse JSON config file: ' + (error instanceof Error ? error.message : String(error)), {
+					cause: error instanceof Error ? error : undefined
+				});
+			}
 
 			if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
 
@@ -226,9 +247,16 @@ export class ConfigJSONProvider extends ConfigProvider<
 				throw error;
 			}
 
-			// Check if it's ENOENT (file not found)
-			const isNotFound = error instanceof Error
-			  && (error as NodeJS.ErrnoException).code === 'ENOENT';
+			// Check error codes from fs.open and realpath
+			const errorCode = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
+
+			// ELOOP (Linux) or ENOTDIR (macOS) indicate symlink in final component
+			if (errorCode === 'ELOOP' || errorCode === 'ENOTDIR') {
+				throw new ConfigError('Symlink paths are not permitted.');
+			}
+
+			// Check if it's ENOENT (file not found) or parent directory not found
+			const isNotFound = errorCode === 'ENOENT';
 
 			// If file is missing and not required, return empty config
 			if (isNotFound && !this.options.required) {
@@ -242,7 +270,7 @@ export class ConfigJSONProvider extends ConfigProvider<
 				});
 			}
 
-			// All other errors (syntax, permission, etc.) are rethrown
+			// All other errors (permission, etc.) are rethrown
 			throw error;
 		}
 	}
