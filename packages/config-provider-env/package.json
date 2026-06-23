@@ -1,0 +1,64 @@
+{
+	"name": "@pawells/config-provider-env",
+	"displayName": "Config ENV Provider",
+	"version": "2.4.0",
+	"description": "Environment variable and dotenv file configuration provider for @pawells/config",
+	"keywords": [
+		"config",
+		"configuration",
+		"environment",
+		"environment-variables",
+		"dotenv",
+		"typescript",
+		"nodejs"
+	],
+	"license": "MIT",
+	"author": {
+		"name": "Phillip Aaron Wells",
+		"email": "69355326+PhillipAWells@users.noreply.github.com"
+	},
+	"homepage": "https://github.com/PhillipAWells/config",
+	"bugs": {
+		"url": "https://github.com/PhillipAWells/config/issues"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/PhillipAWells/config.git",
+		"directory": "packages/config-provider-env"
+	},
+	"funding": {
+		"type": "github",
+		"url": "https://github.com/sponsors/PhillipAWells"
+	},
+	"engines": {
+		"node": ">=22.0.0"
+	},
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		"./package.json": "./package.json",
+		".": {
+			"local": "./src/index.ts",
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js",
+			"default": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist",
+		"CHANGELOG.md",
+		"!**/*.tsbuildinfo",
+		"LICENSE"
+	],
+	"sideEffects": false,
+	"publishConfig": {
+		"access": "public"
+	},
+	"dependencies": {
+		"@pawells/config": "workspace:*",
+		"@pawells/typescript-common": "^3.0.5",
+		"tslib": "^2.8.1",
+		"zod": "^4.4.3"
+	}
+}
