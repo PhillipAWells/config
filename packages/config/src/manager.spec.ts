@@ -8,8 +8,7 @@ import {
 	ConfigNotSetError
 } from './errors.js';
 import { Secret } from './secret.js';
-import type { ISaveableConfigProvider, SaveOptions, ConfigSaveEntry } from './provider.js';
-import type { ConfigProvider } from './provider.js';
+import type { SaveOptions, ConfigSaveEntry, IConfigProvider, ISyncConfigProvider } from './provider.js';
 
 describe('ConfigManager', () => {
 	beforeEach(() => ConfigManager.Reset());
@@ -30,10 +29,11 @@ describe('ConfigManager', () => {
 		});
 
 		it('After Reset, RegisterProvider can be called again', async () => {
-			const provider = {
-				name: 'test',
-				Load: async () => ({ TEST_KEY: 'from-provider' })
-			} as unknown as ConfigProvider;
+			const provider: IConfigProvider = {
+				Name: 'test',
+				Load: async () => ({ TEST_KEY: 'from-provider' }),
+				Save: async () => { /* no-op */ }
+			};
 			ConfigManager.Register('TEST_KEY', z.string(), 'default');
 			await ConfigManager.RegisterProvider(provider);
 			ConfigManager.Reset();
@@ -403,18 +403,18 @@ describe('ConfigManager', () => {
 	});
 
 	describe('ConfigManager.RegisterNamespace', () => {
-		it('Save() resolves section and field from registered namespace', () => {
+		it('Save() resolves section and field from registered namespace', async () => {
 			ConfigManager.RegisterNamespace('Keycloak', 'KEYCLOAK_');
 			ConfigManager.Register('KEYCLOAK_HOST', z.string(), 'localhost');
 
 			let captured: readonly ConfigSaveEntry[] | undefined;
-			const mock: ISaveableConfigProvider = {
-				name: 'mock',
+			const mock: IConfigProvider = {
+				Name: 'mock',
 				Load: async () => ({}),
 				Save: async (entries: readonly ConfigSaveEntry[]) => { captured = entries; }
 			};
 
-			ConfigManager.Save(mock, { path: '' });
+			await ConfigManager.Save(mock, { path: '' });
 
 			expect(captured).toBeDefined();
 			expect(captured).toHaveLength(1);
@@ -423,17 +423,17 @@ describe('ConfigManager', () => {
 			expect(entry?.field).toBe('HOST');
 		});
 
-		it('key with no registered namespace gets empty section and key as field', () => {
+		it('key with no registered namespace gets empty section and key as field', async () => {
 			ConfigManager.Register('STANDALONE_KEY', z.string(), 'value');
 
 			let captured: readonly ConfigSaveEntry[] | undefined;
-			const mock: ISaveableConfigProvider = {
-				name: 'mock',
+			const mock: IConfigProvider = {
+				Name: 'mock',
 				Load: async () => ({}),
 				Save: async (entries: readonly ConfigSaveEntry[]) => { captured = entries; }
 			};
 
-			ConfigManager.Save(mock, { path: '' });
+			await ConfigManager.Save(mock, { path: '' });
 
 			expect(captured).toBeDefined();
 			const entry2 = captured?.[0];
@@ -441,19 +441,19 @@ describe('ConfigManager', () => {
 			expect(entry2?.field).toBe('STANDALONE_KEY');
 		});
 
-		it('Reset() clears namespaces — key falls back to top-level after reset', () => {
+		it('Reset() clears namespaces — key falls back to top-level after reset', async () => {
 			ConfigManager.RegisterNamespace('Test', 'TEST_');
 			ConfigManager.Reset();
 			ConfigManager.Register('TEST_KEY', z.string(), 'value');
 
 			let captured: readonly ConfigSaveEntry[] | undefined;
-			const mock: ISaveableConfigProvider = {
-				name: 'mock',
+			const mock: IConfigProvider = {
+				Name: 'mock',
 				Load: async () => ({}),
 				Save: async (entries: readonly ConfigSaveEntry[]) => { captured = entries; }
 			};
 
-			ConfigManager.Save(mock, { path: '' });
+			await ConfigManager.Save(mock, { path: '' });
 
 			expect(captured).toBeDefined();
 			const entry3 = captured?.[0];
@@ -463,152 +463,152 @@ describe('ConfigManager', () => {
 	});
 
 	describe('ConfigManager.Save', () => {
-		it('passes one entry per registered key to the provider', () => {
+		it('passes one entry per registered key to the provider', async () => {
 			ConfigManager.Register('SAVE_A', z.string(), 'aaa');
 			ConfigManager.Register('SAVE_B', z.number(), 42);
 
 			let captured: readonly ConfigSaveEntry[] | undefined;
-			const mock: ISaveableConfigProvider = {
-				name: 'mock',
+			const mock: IConfigProvider = {
+				Name: 'mock',
 				Load: async () => ({}),
 				Save: async (entries: readonly ConfigSaveEntry[]) => { captured = entries; }
 			};
 
-			ConfigManager.Save(mock, { path: 'out.env' });
+			await ConfigManager.Save(mock, { path: 'out.env' });
 
 			expect(captured).toBeDefined();
 			expect(captured).toHaveLength(2);
 			expect(captured?.map(e => e.key)).toEqual(['SAVE_A', 'SAVE_B']);
 		});
 
-		it('template mode: entry.value is the registered default', () => {
+		it('template mode: entry.value is the registered default', async () => {
 			ConfigManager.Register('TMPL_KEY', z.string(), 'default-val');
 
 			let captured: readonly ConfigSaveEntry[] | undefined;
-			const mock: ISaveableConfigProvider = {
-				name: 'mock',
+			const mock: IConfigProvider = {
+				Name: 'mock',
 				Load: async () => ({}),
 				Save: async (entries: readonly ConfigSaveEntry[]) => { captured = entries; }
 			};
 
-			ConfigManager.Save(mock, { path: '', useCurrentValues: false });
+			await ConfigManager.Save(mock, { path: '', useCurrentValues: false });
 
 			expect(captured).toBeDefined();
 			expect(captured?.[0]?.value).toBe('default-val');
 		});
 
-		it('current-values mode: entry.value is the resolved (overridden) value', () => {
+		it('current-values mode: entry.value is the resolved (overridden) value', async () => {
 			ConfigManager.Register('CV_KEY', z.string(), 'default');
 			ConfigManager.Set('CV_KEY', 'overridden', 'OVERRIDE');
 
 			let captured: readonly ConfigSaveEntry[] | undefined;
-			const mock: ISaveableConfigProvider = {
-				name: 'mock',
+			const mock: IConfigProvider = {
+				Name: 'mock',
 				Load: async () => ({}),
 				Save: async (entries: readonly ConfigSaveEntry[]) => { captured = entries; }
 			};
 
-			ConfigManager.Save(mock, { path: '', useCurrentValues: true });
+			await ConfigManager.Save(mock, { path: '', useCurrentValues: true });
 
 			expect(captured).toBeDefined();
 			expect(captured?.[0]?.value).toBe('overridden');
 		});
 
-		it('secret field: isSecret=true on the entry', () => {
+		it('secret field: isSecret=true on the entry', async () => {
 			ConfigManager.Register('SEC_KEY', Secret(z.string()), 'secret');
 
 			let captured: readonly ConfigSaveEntry[] | undefined;
-			const mock: ISaveableConfigProvider = {
-				name: 'mock',
+			const mock: IConfigProvider = {
+				Name: 'mock',
 				Load: async () => ({}),
 				Save: async (entries: readonly ConfigSaveEntry[]) => { captured = entries; }
 			};
 
-			ConfigManager.Save(mock, { path: '' });
+			await ConfigManager.Save(mock, { path: '' });
 
 			expect(captured).toBeDefined();
 			expect(captured?.[0]?.isSecret).toBe(true);
 		});
 
-		it('non-secret field: isSecret=false on the entry', () => {
+		it('non-secret field: isSecret=false on the entry', async () => {
 			ConfigManager.Register('PLAIN_KEY', z.string(), 'value');
 
 			let captured: readonly ConfigSaveEntry[] | undefined;
-			const mock: ISaveableConfigProvider = {
-				name: 'mock',
+			const mock: IConfigProvider = {
+				Name: 'mock',
 				Load: async () => ({}),
 				Save: async (entries: readonly ConfigSaveEntry[]) => { captured = entries; }
 			};
 
-			ConfigManager.Save(mock, { path: '' });
+			await ConfigManager.Save(mock, { path: '' });
 
 			expect(captured).toBeDefined();
 			expect(captured?.[0]?.isSecret).toBe(false);
 		});
 
-		it('field with .describe(): description populated on entry', () => {
+		it('field with .describe(): description populated on entry', async () => {
 			ConfigManager.Register('DESC_KEY', z.string().describe('The host'), 'h');
 
 			let captured: readonly ConfigSaveEntry[] | undefined;
-			const mock: ISaveableConfigProvider = {
-				name: 'mock',
+			const mock: IConfigProvider = {
+				Name: 'mock',
 				Load: async () => ({}),
 				Save: async (entries: readonly ConfigSaveEntry[]) => { captured = entries; }
 			};
 
-			ConfigManager.Save(mock, { path: '' });
+			await ConfigManager.Save(mock, { path: '' });
 
 			expect(captured).toBeDefined();
 			expect(captured?.[0]?.description).toBe('The host');
 		});
 
-		it('field without .describe(): description is undefined', () => {
+		it('field without .describe(): description is undefined', async () => {
 			ConfigManager.Register('NODESC_KEY', z.string(), 'val');
 
 			let captured: readonly ConfigSaveEntry[] | undefined;
-			const mock: ISaveableConfigProvider = {
-				name: 'mock',
+			const mock: IConfigProvider = {
+				Name: 'mock',
 				Load: async () => ({}),
 				Save: async (entries: readonly ConfigSaveEntry[]) => { captured = entries; }
 			};
 
-			ConfigManager.Save(mock, { path: '' });
+			await ConfigManager.Save(mock, { path: '' });
 
 			expect(captured).toBeDefined();
 			expect(captured?.[0]?.description).toBeUndefined();
 		});
 
-		it('options object is forwarded unchanged to provider.save()', () => {
+		it('options object is forwarded unchanged to provider.Save()', async () => {
 			ConfigManager.Register('FWD_KEY', z.string(), 'v');
 
 			let capturedOptions: SaveOptions | undefined;
-			const mock: ISaveableConfigProvider = {
-				name: 'mock',
+			const mock: IConfigProvider = {
+				Name: 'mock',
 				Load: async () => ({}),
 				Save: async (_entries: readonly ConfigSaveEntry[], opts?: SaveOptions) => { capturedOptions = opts; }
 			};
 
 			const opts: SaveOptions = { path: 'my-output.env', useCurrentValues: true };
-			ConfigManager.Save(mock, opts);
+			await ConfigManager.Save(mock, opts);
 
 			expect(capturedOptions).toBe(opts);
 		});
 
-		it('empty registry: provider.save() called with empty entries array', () => {
+		it('empty registry: provider.Save() called with empty entries array', async () => {
 			let captured: readonly ConfigSaveEntry[] | undefined;
-			const mock: ISaveableConfigProvider = {
-				name: 'mock',
+			const mock: IConfigProvider = {
+				Name: 'mock',
 				Load: async () => ({}),
 				Save: async (entries: readonly ConfigSaveEntry[]) => { captured = entries; }
 			};
 
-			ConfigManager.Save(mock, { path: '' });
+			await ConfigManager.Save(mock, { path: '' });
 
 			expect(captured).toEqual([]);
 		});
 
-		it('handles ConfigurationError gracefully during useCurrentValues save', () => {
-			// When Get() throws ConfigurationError during useCurrentValues save, it should be caught
+		it('handles ConfigValidationError gracefully during useCurrentValues save', async () => {
+			// When Get() throws ConfigValidationError during useCurrentValues save, it should be caught
 			// and value set to undefined, not re-thrown
 			const faultySchema = {
 				safeParse: (value: unknown) => {
@@ -623,36 +623,53 @@ describe('ConfigManager', () => {
 			ConfigManager.Register('FAULTY_KEY', faultySchema as any, 'default');
 
 			let capturedEntries: readonly ConfigSaveEntry[] | undefined;
-			const mock: ISaveableConfigProvider = {
-				name: 'mock',
+			const mock: IConfigProvider = {
+				Name: 'mock',
 				Load: async () => ({}),
 				Save: async (entries: readonly ConfigSaveEntry[]) => { capturedEntries = entries; }
 			};
 
 			// useCurrentValues: true causes Save to call Get, which throws ConfigValidationError
 			// but Save catches it and continues, setting value to undefined
-			expect(() => ConfigManager.Save(mock, { path: './test.json', useCurrentValues: true })).not.toThrow();
+			await expect(ConfigManager.Save(mock, { path: './test.json', useCurrentValues: true })).resolves.toBeUndefined();
 			expect(capturedEntries).toBeDefined();
 			expect(capturedEntries?.[0]?.value).toBeUndefined();
+		});
+
+		it('Save() errors from provider.Save() propagate and reject the promise', async () => {
+			ConfigManager.Register('KEY_A', z.string(), 'value');
+
+			const expectedError = new Error('Provider save failed');
+			const mock: IConfigProvider = {
+				Name: 'mock',
+				Load: async () => ({}),
+				Save: async () => { throw expectedError; }
+			};
+
+			await expect(ConfigManager.Save(mock, { path: 'out.txt' })).rejects.toBe(expectedError);
 		});
 	});
 
 	describe('ConfigManager.RegisterProvider', () => {
 		it('provider value overrides default', async () => {
 			ConfigManager.Register('PROV_KEY', z.string(), 'default-value');
-			await ConfigManager.RegisterProvider({
-				name: 'test-provider',
-				Load: async () => ({ PROV_KEY: 'provider-value' })
-			} as unknown as ConfigProvider);
+			const provider: IConfigProvider = {
+				Name: 'test-provider',
+				Load: async () => ({ PROV_KEY: 'provider-value' }),
+				Save: async () => { /* no-op */ }
+			};
+			await ConfigManager.RegisterProvider(provider);
 			expect(ConfigManager.Get('PROV_KEY')).toBe('provider-value');
 		});
 
 		it('OVERRIDE beats provider which beats DEFAULT', async () => {
 			ConfigManager.Register('PREC_KEY', z.string(), 'default');
-			await ConfigManager.RegisterProvider({
-				name: 'test-provider',
-				Load: async () => ({ PREC_KEY: 'from-provider' })
-			} as unknown as ConfigProvider);
+			const provider: IConfigProvider = {
+				Name: 'test-provider',
+				Load: async () => ({ PREC_KEY: 'from-provider' }),
+				Save: async () => { /* no-op */ }
+			};
+			await ConfigManager.RegisterProvider(provider);
 			ConfigManager.Set('PREC_KEY', 'from-override', 'OVERRIDE');
 			expect(ConfigManager.Get('PREC_KEY')).toBe('from-override');
 			expect(ConfigManager.Get('PREC_KEY', 'DEFAULT')).toBe('default');
@@ -660,23 +677,29 @@ describe('ConfigManager', () => {
 
 		it('later-registered provider wins over earlier for same key', async () => {
 			ConfigManager.Register('MULTI_PROV_KEY', z.string(), 'default');
-			await ConfigManager.RegisterProvider({
-				name: 'provider-1',
-				Load: async () => ({ MULTI_PROV_KEY: 'from-provider-1' })
-			} as unknown as ConfigProvider);
-			await ConfigManager.RegisterProvider({
-				name: 'provider-2',
-				Load: async () => ({ MULTI_PROV_KEY: 'from-provider-2' })
-			} as unknown as ConfigProvider);
+			const provider1: IConfigProvider = {
+				Name: 'provider-1',
+				Load: async () => ({ MULTI_PROV_KEY: 'from-provider-1' }),
+				Save: async () => { /* no-op */ }
+			};
+			const provider2: IConfigProvider = {
+				Name: 'provider-2',
+				Load: async () => ({ MULTI_PROV_KEY: 'from-provider-2' }),
+				Save: async () => { /* no-op */ }
+			};
+			await ConfigManager.RegisterProvider(provider1);
+			await ConfigManager.RegisterProvider(provider2);
 			expect(ConfigManager.Get('MULTI_PROV_KEY')).toBe('from-provider-2');
 		});
 
 		it('provider registered before schema: value applied when schema is registered', async () => {
 			// Register provider BEFORE registering the schema (typical startup pattern)
-			await ConfigManager.RegisterProvider({
-				name: 'early-provider',
-				Load: async () => ({ EARLY_KEY: 'early-value' })
-			} as unknown as ConfigProvider);
+			const provider: IConfigProvider = {
+				Name: 'early-provider',
+				Load: async () => ({ EARLY_KEY: 'early-value' }),
+				Save: async () => { /* no-op */ }
+			};
+			await ConfigManager.RegisterProvider(provider);
 			// Schema registered after provider — provider value should still apply
 			ConfigManager.Register('EARLY_KEY', z.string(), 'default');
 			expect(ConfigManager.Get('EARLY_KEY')).toBe('early-value');
@@ -684,29 +707,52 @@ describe('ConfigManager', () => {
 
 		it('provider value that fails schema validation is silently skipped', async () => {
 			ConfigManager.Register('VALID_NUM_KEY', z.number(), 42);
-			await ConfigManager.RegisterProvider({
-				name: 'bad-provider',
-				Load: async () => ({ VALID_NUM_KEY: 'not-a-number' })
-			} as unknown as ConfigProvider);
+			const provider: IConfigProvider = {
+				Name: 'bad-provider',
+				Load: async () => ({ VALID_NUM_KEY: 'not-a-number' }),
+				Save: async () => { /* no-op */ }
+			};
+			await ConfigManager.RegisterProvider(provider);
 			// Invalid value skipped → default remains
 			expect(ConfigManager.Get('VALID_NUM_KEY')).toBe(42);
 		});
 
+		it('provider value failing validation invokes the warning handler', async () => {
+			const warnSpy = vi.fn();
+			ConfigManager.SetValidationWarningHandler(warnSpy);
+
+			ConfigManager.Register('WARN_KEY', z.number(), 0);
+			const provider: IConfigProvider = {
+				Name: 'bad-provider',
+				Load: async () => ({ WARN_KEY: 'not-a-number' }),
+				Save: async () => { /* no-op */ }
+			};
+			await ConfigManager.RegisterProvider(provider);
+
+			expect(warnSpy).toHaveBeenCalledWith('WARN_KEY', 'bad-provider');
+
+			ConfigManager.SetValidationWarningHandler(undefined);
+		});
+
 		it('provider key with no registered schema is silently skipped', async () => {
-			await ConfigManager.RegisterProvider({
-				name: 'extra-provider',
-				Load: async () => ({ UNREGISTERED_KEY: 'value' })
-			} as unknown as ConfigProvider);
+			const provider: IConfigProvider = {
+				Name: 'extra-provider',
+				Load: async () => ({ UNREGISTERED_KEY: 'value' }),
+				Save: async () => { /* no-op */ }
+			};
+			await ConfigManager.RegisterProvider(provider);
 			// Key not registered — Get should throw NotSet
 			expect(() => ConfigManager.Get('UNREGISTERED_KEY')).toThrow();
 		});
 
 		it('Reset clears providers and provider values', async () => {
 			ConfigManager.Register('RESET_PROV_KEY', z.string(), 'default');
-			await ConfigManager.RegisterProvider({
-				name: 'reset-provider',
-				Load: async () => ({ RESET_PROV_KEY: 'from-provider' })
-			} as unknown as ConfigProvider);
+			const provider: IConfigProvider = {
+				Name: 'reset-provider',
+				Load: async () => ({ RESET_PROV_KEY: 'from-provider' }),
+				Save: async () => { /* no-op */ }
+			};
+			await ConfigManager.RegisterProvider(provider);
 			expect(ConfigManager.Get('RESET_PROV_KEY')).toBe('from-provider');
 			ConfigManager.Reset();
 			// After reset, key is no longer registered at all
@@ -715,26 +761,13 @@ describe('ConfigManager', () => {
 
 		it('provider returns empty record: no values applied', async () => {
 			ConfigManager.Register('NO_PROV_KEY', z.string(), 'default');
-			await ConfigManager.RegisterProvider({
-				name: 'empty-provider',
-				Load: async () => ({})
-			} as unknown as ConfigProvider);
-			expect(ConfigManager.Get('NO_PROV_KEY')).toBe('default');
-		});
-
-		it('warns when a provider value fails schema validation', async () => {
-			const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-
-			ConfigManager.Register('WARN_KEY', z.number(), 0);
-			const provider = {
-				name: 'test-provider',
-				Load: async () => ({ WARN_KEY: 'not-a-number' })
+			const provider: IConfigProvider = {
+				Name: 'empty-provider',
+				Load: async () => ({}),
+				Save: async () => { /* no-op */ }
 			};
-			await ConfigManager.RegisterProvider(provider as unknown as ConfigProvider);
-
-			// Note: current implementation silently skips invalid provider values,
-			// so no warning is expected. If warning behavior is added, update this test.
-			warnSpy.mockRestore();
+			await ConfigManager.RegisterProvider(provider);
+			expect(ConfigManager.Get('NO_PROV_KEY')).toBe('default');
 		});
 
 		describe('ConfigManager.Register with Secret defaults', () => {
@@ -772,6 +805,127 @@ describe('ConfigManager', () => {
 				expect(error).toBeInstanceOf(ConfigValidationError);
 				// Non-secret errors should include the cause
 				expect(error?.cause).toBeDefined();
+			});
+		});
+
+		describe('ConfigManager.Set() with Secret fields', () => {
+			it('Set() on secret field with validation error redacts the cause', () => {
+				const secretSchema = Secret(z.string().min(25));
+				ConfigManager.Register('SECRET_SET_TEST', secretSchema, 'valid-secret-value-here-123');
+
+				let error: ConfigValidationError | undefined;
+				try {
+					ConfigManager.Set('SECRET_SET_TEST', 'short', 'OVERRIDE');
+				}
+				catch (e) {
+					error = e as ConfigValidationError;
+				}
+
+				expect(error).toBeInstanceOf(ConfigValidationError);
+				expect(error?.message).toContain('value redacted for security');
+				expect(error?.cause).toBeUndefined();
+			});
+
+			it('Set() on non-secret field includes cause in error', () => {
+				ConfigManager.Register('PUBLIC_STR', z.string().min(10), 'valid-string');
+
+				let error: ConfigValidationError | undefined;
+				try {
+					ConfigManager.Set('PUBLIC_STR', 'hi', 'OVERRIDE');
+				}
+				catch (e) {
+					error = e as ConfigValidationError;
+				}
+
+				expect(error).toBeInstanceOf(ConfigValidationError);
+				expect(error?.cause).toBeDefined();
+			});
+		});
+
+		describe('Array default cloning', () => {
+			it('Mutating original array before Register does not affect stored default', () => {
+				const original = ['x', 'y', 'z'];
+				ConfigManager.Register('ORIG_CLONE', z.array(z.string()), original);
+
+				original[1] = 'changed';
+
+				const retrieved = ConfigManager.Get('ORIG_CLONE');
+				expect(retrieved).toEqual(['x', 'y', 'z']);
+			});
+		});
+
+		describe('ConfigManager SetValidationWarningHandler', () => {
+			beforeEach(() => {
+				ConfigManager.SetValidationWarningHandler(undefined);
+			});
+
+			it('Handler is called when async provider value fails validation', async () => {
+				const warnSpy = vi.fn();
+				ConfigManager.SetValidationWarningHandler(warnSpy);
+
+				ConfigManager.Register('ASYNC_WARN', z.number(), 0);
+
+				const provider: IConfigProvider = {
+					Name: 'warn-provider',
+					Load: async () => ({ ASYNC_WARN: 'not-a-number' }),
+					Save: async () => { /* no-op */ }
+				};
+
+				await ConfigManager.RegisterProvider(provider);
+
+				expect(warnSpy).toHaveBeenCalledWith('ASYNC_WARN', 'warn-provider');
+			});
+
+			it('Handler is called when sync provider value fails validation', () => {
+				const warnSpy = vi.fn();
+				ConfigManager.SetValidationWarningHandler(warnSpy);
+
+				ConfigManager.Register('SYNC_WARN', z.number(), 0);
+
+				const provider: ISyncConfigProvider = {
+					Name: 'sync-warn-provider',
+					LoadSync: () => ({ SYNC_WARN: 'not-a-number' })
+				};
+
+				ConfigManager.RegisterSyncProvider(provider);
+
+				expect(warnSpy).toHaveBeenCalledWith('SYNC_WARN', 'sync-warn-provider');
+			});
+
+			it('Handler is NOT called when provider value passes validation', async () => {
+				const warnSpy = vi.fn();
+				ConfigManager.SetValidationWarningHandler(warnSpy);
+
+				ConfigManager.Register('GOOD_ASYNC', z.string(), 'default');
+
+				const provider: IConfigProvider = {
+					Name: 'good-provider',
+					Load: async () => ({ GOOD_ASYNC: 'valid' }),
+					Save: async () => { /* no-op */ }
+				};
+
+				await ConfigManager.RegisterProvider(provider);
+
+				expect(warnSpy).not.toHaveBeenCalled();
+			});
+
+			it('Handler can be cleared by setting to undefined', async () => {
+				const warnSpy = vi.fn();
+				ConfigManager.SetValidationWarningHandler(warnSpy);
+
+				ConfigManager.Register('CLEAR_WARN', z.number(), 0);
+
+				ConfigManager.SetValidationWarningHandler(undefined);
+
+				const provider: IConfigProvider = {
+					Name: 'provider',
+					Load: async () => ({ CLEAR_WARN: 'invalid' }),
+					Save: async () => { /* no-op */ }
+				};
+
+				await ConfigManager.RegisterProvider(provider);
+
+				expect(warnSpy).not.toHaveBeenCalled();
 			});
 		});
 	});
@@ -835,18 +989,20 @@ describe('ConfigManager', () => {
 			config1.Register('ENV_KEY', z.string(), 'default1');
 			config2.Register('ENV_KEY', z.string(), 'default2');
 
-			const provider1 = {
-				name: 'provider1',
-				Load: async () => ({ ENV_KEY: 'from-provider1' })
+			const provider1: IConfigProvider = {
+				Name: 'provider1',
+				Load: async () => ({ ENV_KEY: 'from-provider1' }),
+				Save: async () => { /* no-op */ }
 			};
 
-			const provider2 = {
-				name: 'provider2',
-				Load: async () => ({ ENV_KEY: 'from-provider2' })
+			const provider2: IConfigProvider = {
+				Name: 'provider2',
+				Load: async () => ({ ENV_KEY: 'from-provider2' }),
+				Save: async () => { /* no-op */ }
 			};
 
-			await config1.RegisterProvider(provider1 as unknown as ConfigProvider);
-			await config2.RegisterProvider(provider2 as unknown as ConfigProvider);
+			await config1.RegisterProvider(provider1);
+			await config2.RegisterProvider(provider2);
 
 			expect(config1.Get('ENV_KEY')).toBe('from-provider1');
 			expect(config2.Get('ENV_KEY')).toBe('from-provider2');
@@ -869,6 +1025,240 @@ describe('ConfigManager', () => {
 			expect(error?.cause).toBeUndefined();
 			expect(error?.message).toContain('value redacted for security');
 			expect(error?.message).not.toContain(shortSecret);
+		});
+
+		describe('Full ScopedConfigManager lifecycle', () => {
+			it('Register → Set → Get → Reset flow works correctly', () => {
+				const config = new ScopedConfigManager();
+
+				config.Register('LIFE_KEY', z.string(), 'initial');
+				expect(config.Get('LIFE_KEY')).toBe('initial');
+
+				config.Set('LIFE_KEY', 'updated', 'OVERRIDE');
+				expect(config.Get('LIFE_KEY')).toBe('updated');
+
+				config.Reset();
+				expect(() => config.Get('LIFE_KEY')).toThrow(ConfigNotSetError);
+			});
+
+			it('RegisterNamespace works on instance', async () => {
+				const config = new ScopedConfigManager();
+
+				config.RegisterNamespace('Database', 'DB_');
+				config.Register('DB_HOST', z.string(), 'localhost');
+
+				let captured: readonly ConfigSaveEntry[] | undefined;
+				const mock: IConfigProvider = {
+					Name: 'mock',
+					Load: async () => ({}),
+					Save: async (entries: readonly ConfigSaveEntry[]) => { captured = entries; }
+				};
+
+				await config.Save(mock, { path: '' });
+
+				expect(captured).toHaveLength(1);
+				expect(captured?.[0]?.section).toBe('DATABASE');
+				expect(captured?.[0]?.field).toBe('HOST');
+			});
+
+			it('RegisterProvider (async) applies values and respects schema', async () => {
+				const config = new ScopedConfigManager();
+
+				config.Register('ASYNC_KEY', z.number(), 10);
+
+				const provider: IConfigProvider = {
+					Name: 'async-provider',
+					Load: async () => ({ ASYNC_KEY: 99 }),
+					Save: async () => { /* no-op */ }
+				};
+
+				await config.RegisterProvider(provider);
+
+				expect(config.Get('ASYNC_KEY')).toBe(99);
+			});
+
+			it('RegisterSyncProvider applies values synchronously', () => {
+				const config = new ScopedConfigManager();
+
+				config.Register('SYNC_KEY', z.string(), 'default');
+
+				const provider: ISyncConfigProvider = {
+					Name: 'sync-provider',
+					LoadSync: () => ({ SYNC_KEY: 'from-sync' })
+				};
+
+				config.RegisterSyncProvider(provider);
+
+				expect(config.Get('SYNC_KEY')).toBe('from-sync');
+			});
+
+			it('Save with template mode (useCurrentValues: false)', async () => {
+				const config = new ScopedConfigManager();
+
+				config.Register('TMPL_A', z.string(), 'default-value');
+				config.Set('TMPL_A', 'override-value', 'OVERRIDE');
+
+				let captured: readonly ConfigSaveEntry[] | undefined;
+				const mock: IConfigProvider = {
+					Name: 'mock',
+					Load: async () => ({}),
+					Save: async (entries: readonly ConfigSaveEntry[]) => { captured = entries; }
+				};
+
+				await config.Save(mock, { path: 'template.env', useCurrentValues: false });
+
+				expect(captured?.[0]?.value).toBe('default-value');
+			});
+
+			it('Save with current-values mode (useCurrentValues: true)', async () => {
+				const config = new ScopedConfigManager();
+
+				config.Register('CV_KEY', z.string(), 'default');
+				config.Set('CV_KEY', 'current', 'OVERRIDE');
+
+				let captured: readonly ConfigSaveEntry[] | undefined;
+				const mock: IConfigProvider = {
+					Name: 'mock',
+					Load: async () => ({}),
+					Save: async (entries: readonly ConfigSaveEntry[]) => { captured = entries; }
+				};
+
+				await config.Save(mock, { path: 'current.env', useCurrentValues: true });
+
+				expect(captured?.[0]?.value).toBe('current');
+			});
+
+			it('SetValidationWarningHandler invokes callback on provider validation failure', async () => {
+				const config = new ScopedConfigManager();
+				const warnSpy = vi.fn();
+
+				config.SetValidationWarningHandler(warnSpy);
+
+				config.Register('WARN_NUM', z.number(), 0);
+
+				const provider: IConfigProvider = {
+					Name: 'bad-provider',
+					Load: async () => ({ WARN_NUM: 'not-a-number' }),
+					Save: async () => { /* no-op */ }
+				};
+
+				await config.RegisterProvider(provider);
+
+				expect(warnSpy).toHaveBeenCalledWith('WARN_NUM', 'bad-provider');
+			});
+		});
+
+		describe('ScopedConfigManager with Secret fields', () => {
+			it('Set() on secret field redacts error without leaking cause', () => {
+				const config = new ScopedConfigManager();
+
+				const secretSchema = Secret(z.string().min(20));
+				config.Register('SECRET_SET', secretSchema, 'valid-secret-value-here');
+
+				let error: ConfigValidationError | undefined;
+				try {
+					config.Set('SECRET_SET', 'short', 'OVERRIDE');
+				}
+				catch (e) {
+					error = e as ConfigValidationError;
+				}
+
+				expect(error).toBeInstanceOf(ConfigValidationError);
+				expect(error?.message).toContain('value redacted for security');
+				expect(error?.cause).toBeUndefined();
+			});
+		});
+
+		describe('Array default deep-cloning isolation', () => {
+			it('Mutating original array does not affect stored default', () => {
+				const config = new ScopedConfigManager();
+
+				const original = ['x', 'y', 'z'];
+				config.Register('ARR_MUT', z.array(z.string()), original);
+
+				original[1] = 'modified';
+
+				const retrieved = config.Get('ARR_MUT');
+				expect(retrieved).toEqual(['x', 'y', 'z']);
+			});
+		});
+
+		describe('Provider validation with warning handler', () => {
+			it('RegisterSyncProvider invokes handler on validation failure', () => {
+				const config = new ScopedConfigManager();
+				const warnSpy = vi.fn();
+
+				config.SetValidationWarningHandler(warnSpy);
+
+				config.Register('SYNC_NUM', z.number(), 5);
+
+				const provider: ISyncConfigProvider = {
+					Name: 'sync-bad',
+					LoadSync: () => ({ SYNC_NUM: 'invalid' })
+				};
+
+				config.RegisterSyncProvider(provider);
+
+				expect(warnSpy).toHaveBeenCalledWith('SYNC_NUM', 'sync-bad');
+			});
+
+			it('Warning handler not invoked when provider validation succeeds', async () => {
+				const config = new ScopedConfigManager();
+				const warnSpy = vi.fn();
+
+				config.SetValidationWarningHandler(warnSpy);
+
+				config.Register('GOOD_KEY', z.string(), 'default');
+
+				const provider: IConfigProvider = {
+					Name: 'good-provider',
+					Load: async () => ({ GOOD_KEY: 'valid-value' }),
+					Save: async () => { /* no-op */ }
+				};
+
+				await config.RegisterProvider(provider);
+
+				expect(warnSpy).not.toHaveBeenCalled();
+			});
+		});
+
+		describe('ScopedConfigManager Save errors', () => {
+			it('Save() propagates provider.Save() errors', async () => {
+				const config = new ScopedConfigManager();
+
+				config.Register('KEY_X', z.string(), 'val');
+
+				const expectedError = new Error('Save operation failed');
+				const mock: IConfigProvider = {
+					Name: 'bad-save',
+					Load: async () => ({}),
+					Save: async () => { throw expectedError; }
+				};
+
+				await expect(config.Save(mock, { path: 'out.txt' })).rejects.toBe(expectedError);
+			});
+
+			it('Save handles Get() errors gracefully in useCurrentValues mode', async () => {
+				const config = new ScopedConfigManager();
+
+				const faultySchema = {
+					safeParse: (value: unknown) => ({ success: true, data: value }),
+					parse: () => { throw new Error('Parse error'); }
+				};
+
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+				config.Register('FAULTY', faultySchema as any, 'initial');
+
+				let capturedEntries: readonly ConfigSaveEntry[] | undefined;
+				const mock: IConfigProvider = {
+					Name: 'mock',
+					Load: async () => ({}),
+					Save: async (entries: readonly ConfigSaveEntry[]) => { capturedEntries = entries; }
+				};
+
+				await expect(config.Save(mock, { path: 'out.txt', useCurrentValues: true })).resolves.toBeUndefined();
+				expect(capturedEntries?.[0]?.value).toBeUndefined();
+			});
 		});
 	});
 });

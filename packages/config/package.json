@@ -1,7 +1,7 @@
 {
 	"name": "@pawells/config",
 	"displayName": "Config",
-	"version": "2.4.0",
+	"version": "3.0.0",
 	"description": "Type-safe configuration management with environment variable loading and validation",
 	"keywords": [
 		"config",
@@ -35,7 +35,6 @@
 		"node": ">=22.0.0"
 	},
 	"type": "module",
-	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
 	"exports": {
 		"./package.json": "./package.json",
@@ -48,11 +47,13 @@
 	},
 	"files": [
 		"dist",
-		"CHANGELOG.md",
 		"!**/*.tsbuildinfo",
 		"LICENSE"
 	],
 	"sideEffects": false,
+	"scripts": {
+		"test:coverage": "yarn nx test config -- --coverage"
+	},
 	"publishConfig": {
 		"access": "public"
 	},

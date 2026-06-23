@@ -42,7 +42,7 @@ export interface IConfigSchemaObject<
 	 * @param value - Typed value matching the key
 	 * @param source - Override source ('DEFAULT' or 'OVERRIDE'), defaults to 'OVERRIDE'
 	 * @template K - Specific config key type
-	 * @throws Error if the value fails validation
+	 * @throws {ConfigValidationError} If the value fails schema validation
 	 *
 	 * @example
 	 * MongoDBConfig.Set('HOST', 'localhost:27017', 'OVERRIDE');

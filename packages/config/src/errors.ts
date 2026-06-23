@@ -1,10 +1,11 @@
-import { BaseError, type TErrorMetadata } from '@pawells/typescript-common';
 /**
  * Custom error classes for configuration management.
  *
  * Exports: {@link ConfigRegistrationError}, {@link ConfigNotRegisteredError},
- * {@link ConfigurationError}, and {@link ConfigNotSetError}.
+ * {@link ConfigError}, and {@link ConfigNotSetError}.
  */
+
+import { BaseError, type TErrorMetadata } from '@pawells/typescript-common';
 
 /**
  * Abstract base class for configuration errors.
@@ -38,7 +39,7 @@ export class ConfigRegistrationError extends ConfigError {
  * @param key - The configuration key that is not set
  *
  * @example
- * throw new ConfigurationNotSetError('DATABASE_URL');
+ * throw new ConfigNotSetError('DATABASE_URL');
  */
 export class ConfigNotSetError extends ConfigError {
 	constructor(key: string, metadata: TErrorMetadata = {}) {
@@ -62,6 +63,15 @@ export class ConfigNotRegisteredError extends ConfigError {
 	}
 }
 
+/**
+ * Error thrown when a configuration value fails schema validation.
+ *
+ * @param key - The configuration key that failed validation
+ * @param validationMessage - The validation error message describing why the value is invalid
+ *
+ * @example
+ * throw new ConfigValidationError('PORT', 'Expected a number between 1 and 65535');
+ */
 export class ConfigValidationError extends ConfigError {
 	constructor(key: string, validationMessage: string, metadata: TErrorMetadata = {}) {
 		metadata.code ??= 'CONFIG_VALIDATION_ERROR';
