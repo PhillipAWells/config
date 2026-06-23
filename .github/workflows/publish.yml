@@ -61,6 +61,6 @@ jobs:
         run: yarn nx run-many -t publish --all
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3.0.1
+        uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
