@@ -35,7 +35,7 @@ jobs:
           fetch-depth: 0
 
       - name: Enable Corepack
-        run: corepack enable
+        run: corepack enable && COREPACK_ENABLE_STRICT=0 corepack prepare yarn@stable --activate
 
       - uses: actions/setup-node@v6
         with:
