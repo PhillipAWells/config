@@ -1,0 +1,5 @@
+#!/bin/sh
+# Husky pre-commit hook
+# Runs lint and typecheck on all packages
+
+yarn nx run-many --target=lint --all && yarn nx run-many --target=typecheck --all
