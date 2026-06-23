@@ -1,6 +1,6 @@
 import { z } from 'zod/v4';
 import { GetErrorMessage } from '@pawells/typescript-common';
-import { ConfigRegistrationError, ConfigNotRegisteredError, ConfigError, ConfigNotSetError, ConfigValidationError } from './errors.js';
+import { ConfigRegistrationError, ConfigNotRegisteredError, ConfigNotSetError, ConfigValidationError } from './errors.js';
 import { IsMarkedSecret, traverseSchemaToBase } from './secret.js';
 import type { IConfigProvider, ISyncConfigProvider, SaveOptions, ConfigSaveEntry } from './provider.js';
 
@@ -228,8 +228,7 @@ class CoreConfigState {
 				catch (e) {
 					if (
 						e instanceof ConfigNotSetError
-						|| e instanceof ConfigRegistrationError
-						|| e instanceof ConfigError
+						|| e instanceof ConfigNotRegisteredError
 					) {
 						value = undefined;
 					}
@@ -603,11 +602,12 @@ export class ConfigManager {
 	 * @returns - A promise that resolves when registration completes
 	 * @example
 	 * ```typescript
-	 * import { ConfigEnvironmentProvider, ConfigJSONProvider } from '@pawells/config';
+	 * import { ConfigEnvironmentProvider } from '@pawells/config-provider-env';
+	 * import { ConfigJSONProvider } from '@pawells/config-provider-json';
 	 *
 	 * // Register before importing any schema modules
-	 * await ConfigManager.RegisterProvider(new ConfigEnvironmentProvider('.env'));
-	 * await ConfigManager.RegisterProvider(new ConfigJSONProvider('./config.json'));
+	 * await ConfigManager.RegisterProvider(await ConfigEnvironmentProvider.Register({ path: '.env' }));
+	 * await ConfigManager.RegisterProvider(await ConfigJSONProvider.Register({ path: './config.json' }));
 	 * ```
 	 */
 	public static async RegisterProvider(provider: IConfigProvider): Promise<void> {

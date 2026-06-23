@@ -607,9 +607,9 @@ describe('ConfigManager', () => {
 			expect(captured).toEqual([]);
 		});
 
-		it('handles ConfigValidationError gracefully during useCurrentValues save', async () => {
-			// When Get() throws ConfigValidationError during useCurrentValues save, it should be caught
-			// and value set to undefined, not re-thrown
+		it('ConfigValidationError during useCurrentValues save is re-thrown', async () => {
+			// When Get() throws ConfigValidationError during useCurrentValues save, it should be re-thrown
+			// ConfigValidationError is a real error condition, not a "value unavailable" state
 			const faultySchema = {
 				safeParse: (value: unknown) => {
 					return { success: true, data: value };
@@ -622,18 +622,15 @@ describe('ConfigManager', () => {
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			ConfigManager.Register('FAULTY_KEY', faultySchema as any, 'default');
 
-			let capturedEntries: readonly ConfigSaveEntry[] | undefined;
 			const mock: IConfigProvider = {
 				Name: 'mock',
 				Load: async () => ({}),
-				Save: async (entries: readonly ConfigSaveEntry[]) => { capturedEntries = entries; }
+				Save: async () => { /* no-op */ }
 			};
 
 			// useCurrentValues: true causes Save to call Get, which throws ConfigValidationError
-			// but Save catches it and continues, setting value to undefined
-			await expect(ConfigManager.Save(mock, { path: './test.json', useCurrentValues: true })).resolves.toBeUndefined();
-			expect(capturedEntries).toBeDefined();
-			expect(capturedEntries?.[0]?.value).toBeUndefined();
+			// Save re-throws ConfigValidationError because it's a real error, not an unavailable value
+			await expect(ConfigManager.Save(mock, { path: './test.json', useCurrentValues: true })).rejects.toThrow(ConfigValidationError);
 		});
 
 		it('Save() errors from provider.Save() propagate and reject the promise', async () => {
@@ -1238,7 +1235,7 @@ describe('ConfigManager', () => {
 				await expect(config.Save(mock, { path: 'out.txt' })).rejects.toBe(expectedError);
 			});
 
-			it('Save handles Get() errors gracefully in useCurrentValues mode', async () => {
+			it('Save re-throws ConfigValidationError in useCurrentValues mode', async () => {
 				const config = new ScopedConfigManager();
 
 				const faultySchema = {
@@ -1249,15 +1246,14 @@ describe('ConfigManager', () => {
 				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 				config.Register('FAULTY', faultySchema as any, 'initial');
 
-				let capturedEntries: readonly ConfigSaveEntry[] | undefined;
 				const mock: IConfigProvider = {
 					Name: 'mock',
 					Load: async () => ({}),
-					Save: async (entries: readonly ConfigSaveEntry[]) => { capturedEntries = entries; }
+					Save: async () => { /* no-op */ }
 				};
 
-				await expect(config.Save(mock, { path: 'out.txt', useCurrentValues: true })).resolves.toBeUndefined();
-				expect(capturedEntries?.[0]?.value).toBeUndefined();
+				// ConfigValidationError is a real error condition and should be re-thrown, not caught
+				await expect(config.Save(mock, { path: 'out.txt', useCurrentValues: true })).rejects.toThrow(ConfigValidationError);
 			});
 		});
 	});
