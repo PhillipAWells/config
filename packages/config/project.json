@@ -1,0 +1,28 @@
+{
+	"name": "@pawells/config",
+	"metadata": {
+		"description": "Type-safe configuration management with environment variable loading and validation"
+	},
+	"tags": [
+		"npm:public"
+	],
+	"targets": {
+		"publish": {
+			"executor": "nx:run-commands",
+			"options": {
+				"command": "npm publish --provenance --access public",
+				"cwd": "{projectRoot}"
+			},
+			"dependsOn": [
+				"build"
+			]
+		},
+		"clean": {
+			"executor": "nx:run-commands",
+			"options": {
+				"command": "rm -rf dist tsconfig.*.tsbuildinfo",
+				"cwd": "{projectRoot}"
+			}
+		}
+	}
+}
