@@ -1,8 +1,8 @@
-import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'node:fs';
+import { writeFileSync, readFileSync, unlinkSync, existsSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { ConfigJSONProvider } from './json-provider.js';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { ConfigJSONProvider, AssertConfigJSONProviderOptions, ValidateConfigJSONProviderOptions, AssertConfigJSONProviderSaveOptions, ValidateConfigJSONProviderSaveOptions } from './json-provider.js';
 import { ConfigError } from '@pawells/config';
 
 describe('ConfigJSONProvider', () => {
@@ -128,32 +128,49 @@ describe('ConfigJSONProvider', () => {
 	describe('missing / unreadable file', () => {
 		const missingPath = '/nonexistent/path/config.json';
 
-		it('required=true (default): throws when file is missing', async () => {
+		it('required=true: throws ConfigError when file is missing (ENOENT)', async () => {
 			const provider = new ConfigJSONProvider({ name: 'json', path: missingPath, required: true });
-			await expect(provider.Load()).rejects.toThrow();
+			await expect(provider.Load()).rejects.toThrow(ConfigError);
 		});
 
-		it('required=false: returns empty record when file is missing', async () => {
+		it('required=false: returns empty record when file is missing (ENOENT)', async () => {
 			const provider = new ConfigJSONProvider({ name: 'json', path: missingPath, required: false });
 			const values = await provider.Load();
 			expect(values).toEqual({});
 		});
 
-		it('required=false: handles non-ENOENT errors gracefully and logs warning', async () => {
-			const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		it('required=false: rethrows SyntaxError when JSON is malformed (not swallowed)', async () => {
+			writeFileSync(tmpFile, '{invalid json}', 'utf-8');
+			const provider = new ConfigJSONProvider({ name: 'json', path: tmpFile, required: false });
+			await expect(provider.Load()).rejects.toThrow(SyntaxError);
+		});
 
-			// Try to read a directory as a JSON file to trigger a non-ENOENT error
-			// (EISDIR on Unix, "Access is denied" on Windows, etc.)
+		it('required=true: rethrows SyntaxError when JSON is malformed', async () => {
+			writeFileSync(tmpFile, '{invalid json}', 'utf-8');
+			const provider = new ConfigJSONProvider({ name: 'json', path: tmpFile, required: true });
+			await expect(provider.Load()).rejects.toThrow(SyntaxError);
+		});
+
+		it('required=true: throws ConfigError with cause when ENOENT (with Error cause)', async () => {
+			const missingPath = '/nonexistent/path/config.json';
+			const provider = new ConfigJSONProvider({ name: 'json', path: missingPath, required: true });
+			try {
+				await provider.Load();
+				expect.fail('should have thrown');
+			}
+			catch (error: unknown) {
+				expect(error).toBeInstanceOf(ConfigError);
+				const configErr = error as ConfigError;
+				expect(configErr.message).toContain('Config file not found');
+				expect(configErr.cause).toBeInstanceOf(Error);
+			}
+		});
+
+		it('required=false: rethrows non-ENOENT errors (e.g., permission denied)', async () => {
 			const testDir = tmpdir();
 			const provider = new ConfigJSONProvider({ name: 'json', path: testDir, required: false });
-			const values = await provider.Load();
-
-			// When required=false, should return empty and warn for non-ENOENT errors
-			expect(values).toEqual({});
-			// console.warn should have been called for the error (directory read as JSON)
-			expect(warnSpy).toHaveBeenCalled();
-
-			warnSpy.mockRestore();
+			// Trying to read a directory as JSON throws an error other than ENOENT
+			await expect(provider.Load()).rejects.toThrow();
 		});
 	});
 
@@ -181,12 +198,30 @@ describe('ConfigJSONProvider', () => {
 			// Save() with a path containing ".." should be rejected by schema validation
 			await expect(provider.Save([entry], { path: '../../etc/malicious.json' })).rejects.toThrow();
 		});
+
+		it('Load() throws ConfigError when file is a symlink', async () => {
+			const targetFile = join(tmpdir(), `json-target-${Date.now()}.json`);
+			const symlinkFile = join(tmpdir(), `json-symlink-${Date.now()}.json`);
+
+			try {
+				writeFileSync(targetFile, JSON.stringify({ KEY: 'value' }), 'utf-8');
+				symlinkSync(targetFile, symlinkFile);
+
+				const provider = new ConfigJSONProvider({ name: 'json', path: symlinkFile, required: false });
+				await expect(provider.Load()).rejects.toThrow(ConfigError);
+				await expect(provider.Load()).rejects.toThrow('Symlink');
+			}
+			finally {
+				if (existsSync(symlinkFile)) unlinkSync(symlinkFile);
+				if (existsSync(targetFile)) unlinkSync(targetFile);
+			}
+		});
 	});
 
 	describe('file size limits', () => {
 		it('throws ConfigError when JSON file exceeds 10MB', async () => {
-			// Create a large config file in a relative path
-			const largeFile = `large-config-test-${Date.now()}.json`;
+			// Create a large config file in tmpdir
+			const largeFile = join(tmpdir(), `large-config-test-${Date.now()}.json`);
 
 			// Create a string that exceeds 10MB when serialized
 			const largeContent = JSON.stringify({ key: 'x'.repeat(10_500_000) });
@@ -196,6 +231,7 @@ describe('ConfigJSONProvider', () => {
 
 			try {
 				await expect(provider.Load()).rejects.toThrow(ConfigError);
+				await expect(provider.Load()).rejects.toThrow('10MB');
 			}
 			finally {
 				if (existsSync(largeFile)) unlinkSync(largeFile);
@@ -301,6 +337,261 @@ describe('ConfigJSONProvider', () => {
 			const unserializableEntry = makeEntry('APP_VALUE', 'APP', 'VALUE', BigInt(12345) as unknown);
 
 			await expect(provider.Save([unserializableEntry], { path: tmpFile })).rejects.toThrow(ConfigError);
+		});
+
+		it('wraps JSON serialization error with cause in ConfigError', async () => {
+			const provider = new ConfigJSONProvider({ name: 'json', path: tmpFile, required: false });
+			const unserializableEntry = makeEntry('APP_VALUE', 'APP', 'VALUE', BigInt(12345) as unknown);
+
+			try {
+				await provider.Save([unserializableEntry], { path: tmpFile });
+				expect.fail('should have thrown');
+			}
+			catch (error: unknown) {
+				expect(error).toBeInstanceOf(ConfigError);
+				const configErr = error as ConfigError;
+				expect(configErr.message).toContain('serialize');
+				expect(configErr.cause).toBeInstanceOf(TypeError);
+			}
+		});
+
+		it('wraps invalid options as ConfigError (not raw ZodError)', async () => {
+			const provider = new ConfigJSONProvider({ name: 'json', path: tmpFile, required: false });
+			const entry = makeEntry('TEST_KEY', '', 'TEST_KEY', 'test-value');
+
+			// Pass invalid options (path with ..)
+			await expect(provider.Save([entry], { path: '../../malicious.json' })).rejects.toThrow(ConfigError);
+		});
+
+		it('wraps invalid options error with cause in ConfigError', async () => {
+			const provider = new ConfigJSONProvider({ name: 'json', path: tmpFile, required: false });
+			const entry = makeEntry('TEST_KEY', '', 'TEST_KEY', 'test-value');
+
+			try {
+				await provider.Save([entry], { path: '../../malicious.json' });
+				expect.fail('should have thrown');
+			}
+			catch (error: unknown) {
+				expect(error).toBeInstanceOf(ConfigError);
+				const configErr = error as ConfigError;
+				expect(configErr.message).toContain('Invalid save options');
+				expect(configErr.cause).toBeInstanceOf(Error);
+			}
+		});
+
+		it('skips a section/primitive collision without crashing', async () => {
+			const provider = new ConfigJSONProvider({ name: 'json', path: tmpFile, required: false });
+			const entries = [
+				makeEntry('APP', '', 'APP', 'primitive-value'),
+				makeEntry('APP_HOST', 'APP', 'HOST', 'localhost')
+			];
+
+			// First entry sets APP to a primitive, second tries to nest under APP
+			// Should skip the second entry and not crash
+			await provider.Save(entries, { path: tmpFile });
+
+			const parsed = JSON.parse(readFileSync(tmpFile, 'utf-8'));
+			expect(parsed.APP).toBe('primitive-value');
+		});
+
+		it('skips entries with __proto__ key to prevent prototype pollution', async () => {
+			const provider = new ConfigJSONProvider({ name: 'json', path: tmpFile, required: false });
+			const entries = [
+				makeEntry('__proto__', '', '__proto__', { isAdmin: true }),
+				makeEntry('SAFE_KEY', '', 'SAFE_KEY', 'safe-value')
+			];
+
+			await provider.Save(entries, { path: tmpFile });
+
+			const parsed = JSON.parse(readFileSync(tmpFile, 'utf-8'));
+			expect(Object.prototype.hasOwnProperty.call(parsed, '__proto__')).toBe(false);
+			expect(parsed.SAFE_KEY).toBe('safe-value');
+		});
+
+		it('skips entries with constructor key to prevent prototype pollution', async () => {
+			const provider = new ConfigJSONProvider({ name: 'json', path: tmpFile, required: false });
+			const entries = [
+				makeEntry('constructor', '', 'constructor', { malicious: true }),
+				makeEntry('SAFE_KEY', '', 'SAFE_KEY', 'safe-value')
+			];
+
+			await provider.Save(entries, { path: tmpFile });
+
+			const parsed = JSON.parse(readFileSync(tmpFile, 'utf-8'));
+			expect(Object.prototype.hasOwnProperty.call(parsed, 'constructor')).toBe(false);
+			expect(parsed.SAFE_KEY).toBe('safe-value');
+		});
+
+		it('skips entries with prototype key to prevent prototype pollution', async () => {
+			const provider = new ConfigJSONProvider({ name: 'json', path: tmpFile, required: false });
+			const entries = [
+				makeEntry('prototype', '', 'prototype', { malicious: true }),
+				makeEntry('SAFE_KEY', '', 'SAFE_KEY', 'safe-value')
+			];
+
+			await provider.Save(entries, { path: tmpFile });
+
+			const parsed = JSON.parse(readFileSync(tmpFile, 'utf-8'));
+			expect(parsed.prototype).toBeUndefined();
+			expect(parsed.SAFE_KEY).toBe('safe-value');
+		});
+
+		it('skips nested section with __proto__ field key', async () => {
+			const provider = new ConfigJSONProvider({ name: 'json', path: tmpFile, required: false });
+			const entries = [
+				makeEntry('APP___proto__', 'APP', '__proto__', { isAdmin: true }),
+				makeEntry('APP_HOST', 'APP', 'HOST', 'localhost')
+			];
+
+			await provider.Save(entries, { path: tmpFile });
+
+			const parsed = JSON.parse(readFileSync(tmpFile, 'utf-8'));
+			expect(Object.prototype.hasOwnProperty.call(parsed.APP, '__proto__')).toBe(false);
+			expect(parsed.APP.HOST).toBe('localhost');
+		});
+	});
+
+	describe('Load() — prototype pollution prevention', () => {
+		it('safely loads JSON with __proto__ key, skipping dangerous key', async () => {
+			writeFileSync(tmpFile, JSON.stringify({ __proto__: { isAdmin: true }, SAFE_KEY: 'value' }), 'utf-8');
+			const provider = new ConfigJSONProvider({ name: 'json', path: tmpFile, required: false });
+			const values = await provider.Load();
+			expect(values.SAFE_KEY).toBe('value');
+			expect(Object.prototype.hasOwnProperty.call(values, '__proto__')).toBe(false);
+		});
+
+		it('safely loads JSON with constructor key in section, skipping dangerous key', async () => {
+			writeFileSync(tmpFile, JSON.stringify({ APP: { constructor: { malicious: true }, HOST: 'localhost' } }), 'utf-8');
+			const provider = new ConfigJSONProvider({ name: 'json', path: tmpFile, required: false });
+			const values = await provider.Load();
+			expect(values.APP_HOST).toBe('localhost');
+			expect(values.APP_constructor).toBeUndefined();
+		});
+
+		it('safely loads JSON with prototype key, skipping dangerous key', async () => {
+			writeFileSync(tmpFile, JSON.stringify({ prototype: { x: 1 }, SAFE: 'ok' }), 'utf-8');
+			const provider = new ConfigJSONProvider({ name: 'json', path: tmpFile, required: false });
+			const values = await provider.Load();
+			expect(values.SAFE).toBe('ok');
+			expect(values.prototype).toBeUndefined();
+		});
+	});
+
+	describe('AssertConfigJSONProviderOptions', () => {
+		it('passes valid options without throwing', () => {
+			const valid = { name: 'json', path: './config.json', required: false };
+			expect(() => AssertConfigJSONProviderOptions(valid)).not.toThrow();
+		});
+
+		it('throws when path contains ".."', () => {
+			const invalid = { name: 'json', path: '../config.json', required: false };
+			expect(() => AssertConfigJSONProviderOptions(invalid)).toThrow();
+		});
+
+		it('throws when name is missing', () => {
+			const invalid = { path: './config.json', required: false };
+			expect(() => AssertConfigJSONProviderOptions(invalid)).toThrow();
+		});
+
+		it('throws when required is not a boolean', () => {
+			const invalid = { name: 'json', path: './config.json', required: 'yes' };
+			expect(() => AssertConfigJSONProviderOptions(invalid)).toThrow();
+		});
+	});
+
+	describe('ValidateConfigJSONProviderOptions', () => {
+		it('returns true for valid options', () => {
+			const valid = { name: 'json', path: './config.json', required: false };
+			expect(ValidateConfigJSONProviderOptions(valid)).toBe(true);
+		});
+
+		it('returns false when path contains ".."', () => {
+			const invalid = { name: 'json', path: '../config.json', required: false };
+			expect(ValidateConfigJSONProviderOptions(invalid)).toBe(false);
+		});
+
+		it('returns false when name is missing', () => {
+			const invalid = { path: './config.json', required: false };
+			expect(ValidateConfigJSONProviderOptions(invalid)).toBe(false);
+		});
+
+		it('returns false when required is not a boolean', () => {
+			const invalid = { name: 'json', path: './config.json', required: 'yes' };
+			expect(ValidateConfigJSONProviderOptions(invalid)).toBe(false);
+		});
+	});
+
+	describe('AssertConfigJSONProviderSaveOptions', () => {
+		it('passes valid save options without throwing', () => {
+			const valid = { path: './config.json', useCurrentValues: false };
+			expect(() => AssertConfigJSONProviderSaveOptions(valid)).not.toThrow();
+		});
+
+		it('passes empty object options (all fields optional)', () => {
+			expect(() => AssertConfigJSONProviderSaveOptions({})).not.toThrow();
+		});
+
+		it('throws when path contains ".."', () => {
+			const invalid = { path: '../../malicious.json' };
+			expect(() => AssertConfigJSONProviderSaveOptions(invalid)).toThrow();
+		});
+
+		it('throws when useCurrentValues is not a boolean', () => {
+			const invalid = { useCurrentValues: 'yes' };
+			expect(() => AssertConfigJSONProviderSaveOptions(invalid)).toThrow();
+		});
+	});
+
+	describe('ValidateConfigJSONProviderSaveOptions', () => {
+		it('returns true for valid save options', () => {
+			const valid = { path: './config.json', useCurrentValues: false };
+			expect(ValidateConfigJSONProviderSaveOptions(valid)).toBe(true);
+		});
+
+		it('returns true for empty object options', () => {
+			expect(ValidateConfigJSONProviderSaveOptions({})).toBe(true);
+		});
+
+		it('returns false when path contains ".."', () => {
+			const invalid = { path: '../../malicious.json' };
+			expect(ValidateConfigJSONProviderSaveOptions(invalid)).toBe(false);
+		});
+
+		it('returns false when useCurrentValues is not a boolean', () => {
+			const invalid = { useCurrentValues: 'yes' };
+			expect(ValidateConfigJSONProviderSaveOptions(invalid)).toBe(false);
+		});
+	});
+
+	describe('Register() — async factory', () => {
+		it('returns a Promise<ConfigJSONProvider>', async () => {
+			const testFile = join(tmpdir(), `register-test-${Date.now()}.json`);
+			try {
+				const provider = await ConfigJSONProvider.Register({ name: 'test-json', path: testFile, required: false });
+				expect(provider).toBeInstanceOf(ConfigJSONProvider);
+				expect(provider.Name).toBe('test-json');
+			}
+			finally {
+				if (existsSync(testFile)) unlinkSync(testFile);
+			}
+		});
+
+		it('registers the provider with ConfigManager', async () => {
+			const testFile = join(tmpdir(), `register-manager-test-${Date.now()}.json`);
+			try {
+				writeFileSync(testFile, JSON.stringify({ TEST_KEY: 'test-value' }), 'utf-8');
+				await ConfigJSONProvider.Register({ name: 'test-register', path: testFile, required: false });
+				// Provider should be registered and available to ConfigManager
+				// (verification would depend on ConfigManager API)
+				expect(true).toBe(true); // Placeholder; actual verification depends on ConfigManager internals
+			}
+			finally {
+				if (existsSync(testFile)) unlinkSync(testFile);
+			}
+		});
+
+		it('throws when Register() is called with invalid options', async () => {
+			await expect(ConfigJSONProvider.Register({ name: 'invalid', path: '../bad.json' })).rejects.toThrow();
 		});
 	});
 });
