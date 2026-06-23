@@ -1,7 +1,7 @@
 {
 	"$schema": "./node_modules/nx/schemas/nx-schema.json",
 	"sync": {
-		"applyChanges": true
+		"applyChanges": false
 	},
 	"namedInputs": {
 		"default": [
@@ -39,25 +39,11 @@
 			}
 		},
 		{
-			"plugin": "@nx/vite/plugin",
-			"options": {
-				"buildTargetName": "build",
-				"testTargetName": "test",
-				"serveTargetName": "serve",
-				"devTargetName": "dev",
-				"previewTargetName": "preview",
-				"serveStaticTargetName": "serve-static",
-				"typecheckTargetName": "typecheck",
-				"buildDepsTargetName": "build-deps",
-				"watchDepsTargetName": "watch-deps"
-			}
-		},
-		{
 			"plugin": "@nx/vitest",
 			"options": {
 				"testTargetName": "test",
 				"ciTargetName": "test-ci",
-				"testMode": "watch"
+				"testMode": "run"
 			}
 		}
 	],
@@ -65,8 +51,17 @@
 	"disableDaemon": true,
 	"analytics": false,
 	"release": {
+		"projects": ["packages/*"],
 		"version": {
-			"preVersionCommand": "yarn dlx nx run-many -t build"
+			"preVersionCommand": "yarn dlx nx run-many -t build",
+			"git": {
+				"commit": true,
+				"tag": false
+			}
+		},
+		"changelog": {
+			"workspaceChangelog": false,
+			"projectChangelogs": false
 		}
 	},
 	"targetDefaults": {
