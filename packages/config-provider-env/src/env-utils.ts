@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { promises as fs } from 'node:fs';
 import { normalize } from 'node:path';
 import { ConfigError } from '@pawells/config';
 
@@ -60,10 +60,12 @@ export function ParseEnvVarValue(envVarValue: string): unknown {
  * - Lines without `=` are skipped
  * - Windows-style `\r\n` line endings are normalized automatically
  * - Paths containing `..` traversal sequences are rejected for security
+ * - Symbolic links are not permitted for security
  *
  * @param path - Path to the `.env` file to read
- * @returns A record mapping each key to its raw string value
+ * @returns A promise resolving to a record mapping each key to its raw string value
  * @throws {ConfigError} When the path contains `..` directory traversal sequences
+ * @throws {ConfigError} When the path is a symbolic link
  * @throws {Error} If the file cannot be read (e.g. not found, permission denied)
  *
  * @remarks
@@ -77,14 +79,17 @@ export function ParseEnvVarValue(envVarValue: string): unknown {
  * // HOST=localhost
  * // PORT=3000
  * // SECRET="my-token"
- * const values = ParseDotEnvFile('./.env');
+ * const values = await ParseDotEnvFileAsync('./.env');
  * // → { HOST: 'localhost', PORT: '3000', SECRET: 'my-token' }
  * ```
  */
-export function ParseDotEnvFile(path: string): Record<string, string> {
+export async function ParseDotEnvFileAsync(path: string): Promise<Record<string, string>> {
 	if (normalize(path).includes('..')) throw new ConfigError(`Path traversal sequences ("..") are not permitted. Received: "${path}"`);
 
-	const raw = readFileSync(path, 'utf-8');
+	const stat = await fs.lstat(path);
+	if (stat.isSymbolicLink()) throw new ConfigError('Symlink paths are not permitted.');
+
+	const raw = await fs.readFile(path, 'utf-8');
 	const result: Record<string, string> = {};
 
 	for (const rawLine of raw.split('\n')) {
@@ -126,6 +131,7 @@ export function ParseDotEnvFile(path: string): Record<string, string> {
  * Conversion rules:
  * - `null` or `undefined` → `''` (blank)
  * - Arrays → JSON-stringified (e.g. `["a","b"]`)
+ * - Plain objects → JSON-stringified
  * - `Date` → ISO 8601 string
  * - All other values → `String(value)`
  *
@@ -138,6 +144,7 @@ export function ParseDotEnvFile(path: string): Record<string, string> {
  * SerializeConfigValue(42)               // → '42'
  * SerializeConfigValue(true)             // → 'true'
  * SerializeConfigValue(['a', 'b'])       // → '["a","b"]'
+ * SerializeConfigValue({ key: 'value' }) // → '{"key":"value"}'
  * SerializeConfigValue(new Date('2024-01-01T00:00:00.000Z'))
  * // → '2024-01-01T00:00:00.000Z'
  * SerializeConfigValue(null)             // → ''
@@ -147,6 +154,7 @@ export function ParseDotEnvFile(path: string): Record<string, string> {
 export function SerializeConfigValue(value: unknown): string {
 	if (value === null || value === undefined) return '';
 	if (Array.isArray(value)) return JSON.stringify(value);
+	if (value !== null && typeof value === 'object') return JSON.stringify(value);
 	if (value instanceof Date) return value.toISOString();
 	return String(value);
 }

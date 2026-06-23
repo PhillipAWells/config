@@ -2,8 +2,7 @@ import { promises as FS } from 'node:fs';
 import * as PATH from 'node:path';
 import { z } from 'zod/v4';
 import { ConfigProvider, CONFIG_PROVIDER_OPTIONS_SCHEMA, CONFIG_PROVIDER_SAVE_OPTIONS_SCHEMA, type ConfigSaveEntry, ConfigManager } from '@pawells/config';
-import { GetErrorMessage } from '@pawells/typescript-common';
-import { ParseEnvVarValue, ParseDotEnvFile, SerializeConfigValue } from './env-utils.js';
+import { ParseEnvVarValue, ParseDotEnvFileAsync, SerializeConfigValue } from './env-utils.js';
 
 /**
  * Zod schema for validating ConfigEnvironmentProvider constructor options.
@@ -11,11 +10,14 @@ import { ParseEnvVarValue, ParseDotEnvFile, SerializeConfigValue } from './env-u
  * @remarks
  * This schema extends the base {@link CONFIG_PROVIDER_OPTIONS_SCHEMA} with environment-specific fields:
  * - `name`: Unique provider identifier (default: `'environment'`)
- * - `path`: Path to the `.env` file to load (default: `.env` in current working directory)
+ * - `path`: Path to the `.env` file to load (default: `.env` in current working directory);
+ *   paths containing `..` directory traversal sequences are rejected for security
  */
 export const CONFIG_ENV_PROVIDER_OPTIONS_SCHEMA = CONFIG_PROVIDER_OPTIONS_SCHEMA.extend({
 	name: z.string().min(1).default('environment'),
-	path: z.string().min(1).default(PATH.join(process.cwd(), '.env'))
+	path: z.string().min(1).default(PATH.join(process.cwd(), '.env')).refine((path: string) => !PATH.normalize(path).includes('..'), {
+		message: 'Path traversal sequences ("..") are not permitted.'
+	})
 });
 
 /**
@@ -63,47 +65,6 @@ export function AssertConfigENVProviderOptions(options: unknown): asserts option
 export function ValidateConfigENVProviderOptions(options: unknown): boolean {
 	try {
 		AssertConfigENVProviderOptions(options);
-		return true;
-	}
-	catch {
-		return false;
-	}
-}
-
-/**
- * Zod schema for validating ConfigEnvironmentProvider Load options.
- *
- * @remarks
- * Currently reserved for future use. An empty object or options object with optional `path` may be passed.
- */
-export const CONFIG_ENV_PROVIDER_LOAD_OPTIONS_SCHEMA = z.object({
-	path: z.string().min(1).optional()
-});
-
-/**
- * Runtime type extracted from {@link CONFIG_ENV_PROVIDER_LOAD_OPTIONS_SCHEMA}.
- */
-export type TConfigENVProviderLoadOptions = z.infer<typeof CONFIG_ENV_PROVIDER_LOAD_OPTIONS_SCHEMA>;
-
-/**
- * Asserts that a value conforms to {@link TConfigENVProviderLoadOptions}.
- *
- * @param options - The value to validate
- * @throws {ZodError} When validation fails
- */
-export function AssertConfigENVProviderLoadOptions(options: unknown): asserts options is TConfigENVProviderLoadOptions {
-	CONFIG_ENV_PROVIDER_LOAD_OPTIONS_SCHEMA.parse(options);
-}
-
-/**
- * Validates whether a value conforms to {@link TConfigENVProviderLoadOptions}.
- *
- * @param options - The value to validate
- * @returns `true` if valid; `false` otherwise
- */
-export function ValidateConfigENVProviderLoadOptions(options: unknown): boolean {
-	try {
-		AssertConfigENVProviderLoadOptions(options);
 		return true;
 	}
 	catch {
@@ -163,7 +124,33 @@ export function ValidateConfigENVProviderSaveOptions(options: unknown): boolean 
 	}
 }
 
-export class ConfigEnvironmentProvider extends ConfigProvider<TConfigENVProviderOptions, TConfigENVProviderLoadOptions, TConfigENVProviderSaveOptions> {
+/**
+ * Configuration provider for environment variables and `.env` files.
+ *
+ * Loads configuration from `process.env` and an optional `.env` file. This provider
+ * implements the {@link ConfigProvider} interface, supporting both {@link Load} and
+ * {@link Save} operations. It is suitable for development environments and containerized
+ * deployments where configuration is typically provided via environment variables.
+ *
+ * @example
+ * ```typescript
+ * // Register with defaults
+ * const provider = await ConfigEnvironmentProvider.Register();
+ *
+ * // Register with custom path
+ * const provider = await ConfigEnvironmentProvider.Register({
+ *   path: '.env.production'
+ * });
+ *
+ * // Or instantiate directly
+ * const provider = new ConfigEnvironmentProvider({
+ *   name: 'app-env',
+ *   path: '.env'
+ * });
+ * await ConfigManager.RegisterProvider(provider);
+ * ```
+ */
+export class ConfigEnvironmentProvider extends ConfigProvider<TConfigENVProviderOptions, unknown, TConfigENVProviderSaveOptions> {
 	/**
 	 * Initialize a configuration provider that loads from environment variables and a `.env` file.
 	 *
@@ -180,8 +167,8 @@ export class ConfigEnvironmentProvider extends ConfigProvider<TConfigENVProvider
 	 * ```
 	 */
 	constructor(options: TConfigENVProviderOptions) {
-		AssertConfigENVProviderOptions(options);
 		super(options);
+		AssertConfigENVProviderOptions(options);
 	}
 
 	/**
@@ -195,7 +182,6 @@ export class ConfigEnvironmentProvider extends ConfigProvider<TConfigENVProvider
 	 * the file is skipped and only environment variables are returned. File errors are logged
 	 * via `console.warn` for diagnostic purposes.
 	 *
-	 * @param options - Optional load options (currently unused; reserved for future use)
 	 * @returns A record of fully-qualified config key names to their parsed values
 	 *
 	 * @example
@@ -221,7 +207,7 @@ export class ConfigEnvironmentProvider extends ConfigProvider<TConfigENVProvider
 
 		if (this.options.path !== undefined) {
 			try {
-				const dotenv = ParseDotEnvFile(this.options.path);
+				const dotenv = await ParseDotEnvFileAsync(this.options.path);
 				for (const [key, value] of Object.entries(dotenv)) {
 					result[key] = ParseEnvVarValue(value);
 				}
@@ -230,9 +216,9 @@ export class ConfigEnvironmentProvider extends ConfigProvider<TConfigENVProvider
 				// Safely check if error is a file-not-found (ENOENT) error
 				const isNotFound = error instanceof Error && 'code' in error && (error as { code?: string }).code === 'ENOENT';
 				if (!isNotFound) {
-					// Log non-ENOENT errors for diagnostic purposes
+					// Log non-ENOENT errors for diagnostic purposes; generic message avoids leaking paths
 					// eslint-disable-next-line no-console
-					console.warn(`[ConfigEnvironmentProvider] Error reading dotenv file: ${GetErrorMessage(error)}`);
+					console.warn('[ConfigEnvironmentProvider] Failed to read dotenv file.');
 				}
 			}
 		}
@@ -279,7 +265,7 @@ export class ConfigEnvironmentProvider extends ConfigProvider<TConfigENVProvider
 	 * ```
 	 */
 	public async Save(entries: readonly ConfigSaveEntry[], options?: TConfigENVProviderSaveOptions): Promise<void> {
-		AssertConfigENVProviderSaveOptions(options);
+		if (options !== undefined) AssertConfigENVProviderSaveOptions(options);
 		const useCurrentValues = options?.useCurrentValues ?? false;
 		const path = options?.path ?? this.options.path;
 		const lines: string[] = [];

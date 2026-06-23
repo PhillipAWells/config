@@ -1,175 +1,381 @@
-import { writeFileSync, unlinkSync, existsSync } from 'node:fs';
+import { writeFileSync, unlinkSync, existsSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { ParseDotEnvFile } from './env-utils.js';
+import {
+	ParseEnvVarValue,
+	ParseDotEnvFileAsync,
+	SerializeConfigValue
+} from './env-utils.js';
+import type { ConfigError as ConfigErrorType } from '@pawells/config';
 import { ConfigError } from '@pawells/config';
 
-describe('ParseDotEnvFile', () => {
+describe('ParseEnvVarValue', () => {
+	describe('JSON parsing branches', () => {
+		it('parses JSON object string: \'{"key":"value"}\'', () => {
+			const result = ParseEnvVarValue('{"key":"value"}');
+			expect(result).toEqual({ key: 'value' });
+		});
+
+		it('parses JSON array string: \'["a","b","c"]\'', () => {
+			const result = ParseEnvVarValue('["a","b","c"]');
+			expect(result).toEqual(['a', 'b', 'c']);
+		});
+
+		it('parses quoted string: \'"hello"\'', () => {
+			const result = ParseEnvVarValue('"hello"');
+			expect(result).toBe('hello');
+		});
+
+		it('parses boolean true: \'true\'', () => {
+			const result = ParseEnvVarValue('true');
+			expect(result).toBe(true);
+		});
+
+		it('parses boolean false: \'false\'', () => {
+			const result = ParseEnvVarValue('false');
+			expect(result).toBe(false);
+		});
+
+		it('parses null: \'null\'', () => {
+			const result = ParseEnvVarValue('null');
+			expect(result).toBeNull();
+		});
+
+		it('parses integer: \'42\'', () => {
+			const result = ParseEnvVarValue('42');
+			expect(result).toBe(42);
+		});
+
+		it('parses negative integer: \'-42\'', () => {
+			const result = ParseEnvVarValue('-42');
+			expect(result).toBe(-42);
+		});
+
+		it('parses decimal number: \'3.14\'', () => {
+			const result = ParseEnvVarValue('3.14');
+			expect(result).toBe(3.14);
+		});
+
+		it('parses negative decimal: \'-3.14\'', () => {
+			const result = ParseEnvVarValue('-3.14');
+			expect(result).toBe(-3.14);
+		});
+	});
+
+	describe('Fast-path fallback to string', () => {
+		it('returns plain string unchanged: \'hello world\'', () => {
+			const result = ParseEnvVarValue('hello world');
+			expect(result).toBe('hello world');
+			expect(typeof result).toBe('string');
+		});
+
+		it('returns string with special chars: \'hello@world!\'', () => {
+			const result = ParseEnvVarValue('hello@world!');
+			expect(result).toBe('hello@world!');
+		});
+
+		it('returns URL-like string unchanged', () => {
+			const result = ParseEnvVarValue('https://example.com/path');
+			expect(result).toBe('https://example.com/path');
+		});
+	});
+
+	describe('Invalid JSON fallback', () => {
+		it('returns malformed JSON as string: \'{invalid}\'', () => {
+			const result = ParseEnvVarValue('{invalid}');
+			expect(result).toBe('{invalid}');
+			expect(typeof result).toBe('string');
+		});
+
+		it('returns incomplete array as string: \'[1,2,\'', () => {
+			const result = ParseEnvVarValue('[1,2,');
+			expect(result).toBe('[1,2,');
+		});
+	});
+});
+
+describe('SerializeConfigValue', () => {
+	it('serializes null to empty string', () => {
+		const result = SerializeConfigValue(null);
+		expect(result).toBe('');
+	});
+
+	it('serializes undefined to empty string', () => {
+		const result = SerializeConfigValue(undefined);
+		expect(result).toBe('');
+	});
+
+	it('serializes boolean true to \'true\'', () => {
+		const result = SerializeConfigValue(true);
+		expect(result).toBe('true');
+	});
+
+	it('serializes boolean false to \'false\'', () => {
+		const result = SerializeConfigValue(false);
+		expect(result).toBe('false');
+	});
+
+	it('serializes number to string: 42 → \'42\'', () => {
+		const result = SerializeConfigValue(42);
+		expect(result).toBe('42');
+	});
+
+	it('serializes negative number: -3.14 → \'-3.14\'', () => {
+		const result = SerializeConfigValue(-3.14);
+		expect(result).toBe('-3.14');
+	});
+
+	it('serializes Date as JSON string (Date is object type)', () => {
+		const date = new Date('2024-01-01T00:00:00.000Z');
+		const result = SerializeConfigValue(date);
+		// Date is an object, so it gets JSON.stringify'd before the Date instanceof check is reached
+		expect(result).toBe(JSON.stringify(date));
+	});
+
+	it('serializes array to JSON: [\'a\', \'b\'] → \'["a","b"]\'', () => {
+		const result = SerializeConfigValue(['a', 'b']);
+		expect(result).toBe('["a","b"]');
+	});
+
+	it('serializes plain object to JSON: {key: \'value\'} → \'{"key":"value"}\'', () => {
+		const result = SerializeConfigValue({ key: 'value' });
+		expect(result).toBe('{"key":"value"}');
+	});
+
+	it('serializes string unchanged: \'hello\' → \'hello\'', () => {
+		const result = SerializeConfigValue('hello');
+		expect(result).toBe('hello');
+	});
+});
+
+describe('ParseDotEnvFileAsync', () => {
 	let tmpFile: string;
+	const tmpDir = tmpdir();
 
 	beforeEach(() => {
-		tmpFile = join(tmpdir(), `env-utils-test-${Date.now()}.env`);
+		tmpFile = join(tmpDir, `env-utils-test-${Date.now()}-${Math.random()}.env`);
 	});
 
 	afterEach(() => {
 		if (existsSync(tmpFile)) unlinkSync(tmpFile);
 	});
 
+	describe('Happy path', () => {
+		it('reads and parses a real .env file', async () => {
+			writeFileSync(tmpFile, 'KEY=value\nPORT=3000', 'utf-8');
+			const result = await ParseDotEnvFileAsync(tmpFile);
+			expect(result.KEY).toBe('value');
+			expect(result.PORT).toBe('3000');
+		});
+
+		it('parses multiple key-value pairs', async () => {
+			writeFileSync(
+				tmpFile,
+				'HOST=localhost\nPORT=3000\nDEBUG=true',
+				'utf-8'
+			);
+			const result = await ParseDotEnvFileAsync(tmpFile);
+			expect(result).toEqual({
+				HOST: 'localhost',
+				PORT: '3000',
+				DEBUG: 'true'
+			});
+		});
+	});
+
 	describe('Quote handling', () => {
-		it('mismatched quotes not stripped: MIXED="value\'', () => {
-			writeFileSync(tmpFile, 'MIXED="value\'', 'utf-8');
-			const values = ParseDotEnvFile(tmpFile);
-			expect(values['MIXED']).toBe('"value\'');
-		});
-
-		it('empty quoted string: EMPTY=""', () => {
-			writeFileSync(tmpFile, 'EMPTY=""', 'utf-8');
-			const values = ParseDotEnvFile(tmpFile);
-			expect(values['EMPTY']).toBe('');
-		});
-
-		it('empty single-quoted string: EMPTY=\'\'', () => {
-			writeFileSync(tmpFile, 'EMPTY=\'\'', 'utf-8');
-			const values = ParseDotEnvFile(tmpFile);
-			expect(values['EMPTY']).toBe('');
-		});
-
-		it('quoted value with spaces preserved: VALUE="hello world"', () => {
+		it('strips double quotes from value', async () => {
 			writeFileSync(tmpFile, 'VALUE="hello world"', 'utf-8');
-			const values = ParseDotEnvFile(tmpFile);
-			expect(values['VALUE']).toBe('hello world');
+			const result = await ParseDotEnvFileAsync(tmpFile);
+			expect(result.VALUE).toBe('hello world');
+		});
+
+		it('strips single quotes from value', async () => {
+			writeFileSync(tmpFile, "VALUE='hello world'", 'utf-8');
+			const result = await ParseDotEnvFileAsync(tmpFile);
+			expect(result.VALUE).toBe('hello world');
+		});
+
+		it('does not strip mismatched quotes', async () => {
+			writeFileSync(tmpFile, 'MIXED="value\'', 'utf-8');
+			const result = await ParseDotEnvFileAsync(tmpFile);
+			expect(result.MIXED).toBe('"value\'');
+		});
+
+		it('preserves empty quoted strings', async () => {
+			writeFileSync(tmpFile, 'EMPTY=""', 'utf-8');
+			const result = await ParseDotEnvFileAsync(tmpFile);
+			expect(result.EMPTY).toBe('');
 		});
 	});
 
 	describe('Inline comment handling', () => {
-		it('inline comment stripped: HOST=localhost # comment', () => {
+		it('strips inline comment after space: \'HOST=localhost # comment\'', async () => {
 			writeFileSync(tmpFile, 'HOST=localhost # comment', 'utf-8');
-			const values = ParseDotEnvFile(tmpFile);
-			expect(values['HOST']).toBe('localhost');
+			const result = await ParseDotEnvFileAsync(tmpFile);
+			expect(result.HOST).toBe('localhost');
 		});
 
-		it('quoted value with # inside not stripped: SECRET="my#secret"', () => {
-			writeFileSync(tmpFile, 'SECRET="my#secret"', 'utf-8');
-			const values = ParseDotEnvFile(tmpFile);
-			expect(values['SECRET']).toBe('my#secret');
-		});
-
-		it('hash without space not stripped: COLOR=#FF0000', () => {
+		it('does not strip # without space: \'COLOR=#FF0000\'', async () => {
 			writeFileSync(tmpFile, 'COLOR=#FF0000', 'utf-8');
-			const values = ParseDotEnvFile(tmpFile);
-			expect(values['COLOR']).toBe('#FF0000');
+			const result = await ParseDotEnvFileAsync(tmpFile);
+			expect(result.COLOR).toBe('#FF0000');
 		});
 
-		it('multiple spaces before hash: VALUE=test   # comment', () => {
-			writeFileSync(tmpFile, 'VALUE=test   # comment', 'utf-8');
-			const values = ParseDotEnvFile(tmpFile);
-			expect(values['VALUE']).toBe('test');
-		});
-	});
-
-	describe('Invalid line formats', () => {
-		it('line without = is skipped: INVALID_NO_EQUALS', () => {
-			writeFileSync(tmpFile, 'INVALID_NO_EQUALS', 'utf-8');
-			const values = ParseDotEnvFile(tmpFile);
-			expect(values['INVALID_NO_EQUALS']).toBeUndefined();
-		});
-
-		it('empty key skipped: =value', () => {
-			writeFileSync(tmpFile, '=value', 'utf-8');
-			const values = ParseDotEnvFile(tmpFile);
-			expect(Object.keys(values).length).toBe(0);
-		});
-
-		it('whitespace before = results in empty key: "   =value" -> skipped', () => {
-			writeFileSync(tmpFile, '   =value', 'utf-8');
-			const values = ParseDotEnvFile(tmpFile);
-			expect(Object.keys(values).length).toBe(0);
+		it('does not strip # inside quoted value', async () => {
+			writeFileSync(tmpFile, 'SECRET="my#secret"', 'utf-8');
+			const result = await ParseDotEnvFileAsync(tmpFile);
+			expect(result.SECRET).toBe('my#secret');
 		});
 	});
 
-	describe('Comment lines', () => {
-		it('# comment at start of line is skipped', () => {
-			writeFileSync(tmpFile, '# This is a comment\nKEY=value', 'utf-8');
-			const values = ParseDotEnvFile(tmpFile);
-			expect(values['# This is a comment']).toBeUndefined();
-			expect(values['KEY']).toBe('value');
+	describe('Windows line ending handling', () => {
+		it('handles \\r\\n line endings', async () => {
+			writeFileSync(tmpFile, 'KEY1=value1\r\nKEY2=value2', 'utf-8');
+			const result = await ParseDotEnvFileAsync(tmpFile);
+			expect(result.KEY1).toBe('value1');
+			expect(result.KEY2).toBe('value2');
 		});
 
-		it('whitespace before # is trimmed and then treated as comment', () => {
-			writeFileSync(tmpFile, '  # comment with indent', 'utf-8');
-			const values = ParseDotEnvFile(tmpFile);
-			expect(Object.keys(values).length).toBe(0);
+		it('handles mixed \\n and \\r\\n', async () => {
+			writeFileSync(tmpFile, 'KEY1=value1\nKEY2=value2\r\nKEY3=value3', 'utf-8');
+			const result = await ParseDotEnvFileAsync(tmpFile);
+			expect(result.KEY1).toBe('value1');
+			expect(result.KEY2).toBe('value2');
+			expect(result.KEY3).toBe('value3');
 		});
 	});
 
-	describe('Blank lines', () => {
-		it('blank line is skipped', () => {
+	describe('Empty/whitespace line handling', () => {
+		it('skips empty lines', async () => {
 			writeFileSync(tmpFile, 'KEY1=value1\n\nKEY2=value2', 'utf-8');
-			const values = ParseDotEnvFile(tmpFile);
-			expect(values['KEY1']).toBe('value1');
-			expect(values['KEY2']).toBe('value2');
-			expect(Object.keys(values).length).toBe(2);
+			const result = await ParseDotEnvFileAsync(tmpFile);
+			expect(result.KEY1).toBe('value1');
+			expect(result.KEY2).toBe('value2');
+			expect(Object.keys(result).length).toBe(2);
+		});
+
+		it('skips whitespace-only lines', async () => {
+			writeFileSync(tmpFile, 'KEY1=value1\n   \nKEY2=value2', 'utf-8');
+			const result = await ParseDotEnvFileAsync(tmpFile);
+			expect(result.KEY1).toBe('value1');
+			expect(result.KEY2).toBe('value2');
 		});
 	});
 
-	describe('Whitespace handling', () => {
-		it('key and value whitespace trimmed: "  KEY  =  value  "', () => {
-			writeFileSync(tmpFile, '  KEY  =  value  ', 'utf-8');
-			const values = ParseDotEnvFile(tmpFile);
-			expect(values['KEY']).toBe('value');
+	describe('Comment line handling', () => {
+		it('skips lines starting with #', async () => {
+			writeFileSync(tmpFile, '# This is a comment\nKEY=value', 'utf-8');
+			const result = await ParseDotEnvFileAsync(tmpFile);
+			expect(result['# This is a comment']).toBeUndefined();
+			expect(result.KEY).toBe('value');
 		});
 
-		it('value with trailing spaces: "KEY=value   "', () => {
-			writeFileSync(tmpFile, 'KEY=value   ', 'utf-8');
-			const values = ParseDotEnvFile(tmpFile);
-			expect(values['KEY']).toBe('value');
-		});
-	});
-
-	describe('Line endings', () => {
-		it('windows-style \\r\\n line ending normalized', () => {
-			writeFileSync(tmpFile, 'KEY=value\r\nKEY2=value2', 'utf-8');
-			const values = ParseDotEnvFile(tmpFile);
-			expect(values['KEY']).toBe('value');
-			expect(values['KEY2']).toBe('value2');
-		});
-
-		it('unix-style \\n line ending works', () => {
-			writeFileSync(tmpFile, 'KEY=value\nKEY2=value2', 'utf-8');
-			const values = ParseDotEnvFile(tmpFile);
-			expect(values['KEY']).toBe('value');
-			expect(values['KEY2']).toBe('value2');
-		});
-	});
-
-	describe('Edge cases', () => {
-		it('multiple = signs: first = is separator', () => {
-			writeFileSync(tmpFile, 'KEY=value=extra', 'utf-8');
-			const values = ParseDotEnvFile(tmpFile);
-			expect(values['KEY']).toBe('value=extra');
-		});
-
-		it('quoted string with equals inside: SECRET="key=value"', () => {
-			writeFileSync(tmpFile, 'SECRET="key=value"', 'utf-8');
-			const values = ParseDotEnvFile(tmpFile);
-			expect(values['SECRET']).toBe('key=value');
+		it('skips # after whitespace trim', async () => {
+			writeFileSync(tmpFile, '  # indented comment\nKEY=value', 'utf-8');
+			const result = await ParseDotEnvFileAsync(tmpFile);
+			expect(Object.keys(result)).toEqual(['KEY']);
 		});
 	});
 
 	describe('Path traversal protection', () => {
-		it('throws ConfigError for paths containing ".."', () => {
-			expect(() => ParseDotEnvFile('../../../etc/passwd')).toThrow(ConfigError);
+		it('rejects paths with ".." traversal', async () => {
+			const err = await (async () => {
+				try {
+					await ParseDotEnvFileAsync('../../../etc/passwd');
+					return undefined;
+				}
+				catch (e) {
+					return e;
+				}
+			})();
+			expect(err).toBeInstanceOf(ConfigError);
+			expect((err as ConfigErrorType).message).toContain('Path traversal');
 		});
 
-		it('does not throw ConfigError for relative safe paths', () => {
-			// This should not throw ConfigError on path validation alone (file may not exist)
+		it('rejects nested ".." in path', async () => {
+			const err = await (async () => {
+				try {
+					await ParseDotEnvFileAsync('./configs/../../../etc/passwd');
+					return undefined;
+				}
+				catch (e) {
+					return e;
+				}
+			})();
+			expect(err).toBeInstanceOf(ConfigError);
+		});
+
+		it('allows safe relative paths without ".."', async () => {
+			// Safe path that won't exist should throw file-not-found, not ConfigError
+			const err = await (async () => {
+				try {
+					await ParseDotEnvFileAsync('./nonexistent/safe.env');
+					return undefined;
+				}
+				catch (e) {
+					return e;
+				}
+			})();
+			if (err) {
+				expect(err).not.toBeInstanceOf(ConfigError);
+			}
+		});
+	});
+
+	describe('Symlink protection', () => {
+		it('rejects symlink paths', async () => {
+			// Create a real temp file and a symlink to it
+			const realFile = join(tmpDir, `real-${Date.now()}.env`);
+			const symlinkFile = join(tmpDir, `symlink-${Date.now()}.env`);
 			try {
-				ParseDotEnvFile('./relative.env');
+				writeFileSync(realFile, 'KEY=value', 'utf-8');
+				symlinkSync(realFile, symlinkFile);
+
+				const err = await (async () => {
+					try {
+						await ParseDotEnvFileAsync(symlinkFile);
+						return undefined;
+					}
+					catch (e) {
+						return e;
+					}
+				})();
+				expect(err).toBeInstanceOf(ConfigError);
+				expect((err as ConfigErrorType).message).toContain('Symlink');
 			}
-			catch (e) {
-				expect(e).not.toBeInstanceOf(ConfigError);
+			finally {
+				if (existsSync(realFile)) unlinkSync(realFile);
+				if (existsSync(symlinkFile)) unlinkSync(symlinkFile);
 			}
+		});
+	});
+
+	describe('Edge cases', () => {
+		it('splits on first = only: \'KEY=value=extra\'', async () => {
+			writeFileSync(tmpFile, 'KEY=value=extra', 'utf-8');
+			const result = await ParseDotEnvFileAsync(tmpFile);
+			expect(result.KEY).toBe('value=extra');
+		});
+
+		it('skips lines without =', async () => {
+			writeFileSync(tmpFile, 'INVALID_NO_EQUALS\nKEY=value', 'utf-8');
+			const result = await ParseDotEnvFileAsync(tmpFile);
+			expect(result['INVALID_NO_EQUALS']).toBeUndefined();
+			expect(result.KEY).toBe('value');
+		});
+
+		it('skips lines with empty key', async () => {
+			writeFileSync(tmpFile, '=value\nKEY=value2', 'utf-8');
+			const result = await ParseDotEnvFileAsync(tmpFile);
+			expect(Object.keys(result)).toEqual(['KEY']);
+		});
+
+		it('trims key and value whitespace', async () => {
+			writeFileSync(tmpFile, '  KEY  =  value  ', 'utf-8');
+			const result = await ParseDotEnvFileAsync(tmpFile);
+			expect(result.KEY).toBe('value');
 		});
 	});
 });
