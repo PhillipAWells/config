@@ -1,0 +1,31 @@
+{
+	"name": "pawells-config",
+	"build": {
+		"dockerfile": "Dockerfile"
+	},
+	"forwardPorts": [
+		4873
+	],
+	"features": {
+		"ghcr.io/devcontainers/features/common-utils:2": {},
+		"ghcr.io/devcontainers/features/git:1": {},
+		"ghcr.io/devcontainers/features/github-cli:1": {},
+		"ghcr.io/devcontainers/features/node:1": {
+			"version": "24"
+		}
+	},
+	"postCreateCommand": "bash .devcontainer/scripts/postCreate.sh",
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"vscode.typescript-language-features",
+				"ms-vscode.js-debug",
+				"vscode.npm",
+				"eamodio.gitlens",
+				"Anthropic.claude-code"
+			]
+		}
+	},
+	"remoteUser": "dev",
+	"updateRemoteUserUID": true
+}
