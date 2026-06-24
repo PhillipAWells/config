@@ -1,7 +1,7 @@
 {
 	"name": "@pawells/config-provider-env",
 	"displayName": "Config ENV Provider",
-	"version": "3.0.0",
+	"version": "3.0.1",
 	"description": "Environment variable and dotenv file configuration provider for @pawells/config",
 	"keywords": [
 		"config",
@@ -57,7 +57,7 @@
 		"access": "public"
 	},
 	"dependencies": {
-		"@pawells/config": "workspace:*",
+		"@pawells/config": "workspace:^",
 		"tslib": "^2.8.1",
 		"zod": "^4.4.3"
 	}
