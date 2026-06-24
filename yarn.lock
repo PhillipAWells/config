@@ -1781,7 +1781,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@pawells/config-provider-env@workspace:packages/config-provider-env"
   dependencies:
-    "@pawells/config": "workspace:*"
+    "@pawells/config": "workspace:^"
     tslib: "npm:^2.8.1"
     zod: "npm:^4.4.3"
   languageName: unknown
@@ -1791,7 +1791,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@pawells/config-provider-json@workspace:packages/config-provider-json"
   dependencies:
-    "@pawells/config": "workspace:*"
+    "@pawells/config": "workspace:^"
     "@pawells/typescript-common": "npm:^3.0.5"
     tslib: "npm:^2.8.1"
     zod: "npm:^4.4.3"
@@ -1825,7 +1825,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@pawells/config@workspace:*, @pawells/config@workspace:packages/config":
+"@pawells/config@workspace:^, @pawells/config@workspace:packages/config":
   version: 0.0.0-use.local
   resolution: "@pawells/config@workspace:packages/config"
   dependencies:
