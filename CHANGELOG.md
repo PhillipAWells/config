@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.0.1] - 2026-06-23
+
+### Fixed
+
+- `@pawells/config-provider-env` and `@pawells/config-provider-json` were published at 3.0.0 with an unresolved `workspace:*` dependency on `@pawells/config` in their npm manifests, causing `yarn install` to fail for external consumers. The publish pipeline now uses `yarn npm publish` instead of `npm publish`, which rewrites workspace protocol references to semver ranges (`^3.0.0`) before uploading the tarball. A CI guard now fails the publish if any `workspace:` token remains in a packed manifest.
+
+---
+
 ## [3.0.0] - 2026-06-23
 
 ### Breaking Changes
@@ -310,5 +318,6 @@ await ConfigManager.RegisterProvider(
 
 ---
 
-[Unreleased]: https://github.com/PhillipAWells/config/compare/v3.0.0...HEAD
+[Unreleased]: https://github.com/PhillipAWells/config/compare/v3.0.1...HEAD
+[3.0.1]: https://github.com/PhillipAWells/config/compare/v3.0.0...v3.0.1
 [3.0.0]: https://github.com/PhillipAWells/config/releases/tag/v3.0.0
