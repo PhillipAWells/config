@@ -1,7 +1,7 @@
 {
 	"name": "@pawells/config-provider-json",
 	"displayName": "Config JSON Provider",
-	"version": "3.0.1",
+	"version": "3.0.2",
 	"description": "JSON file configuration provider for @pawells/config",
 	"keywords": [
 		"config",
