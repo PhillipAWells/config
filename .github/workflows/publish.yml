@@ -49,6 +49,18 @@ jobs:
       - name: Build
         run: yarn nx run-many -t build --all
 
+      - name: Verify no workspace tokens in packed manifests
+        run: |
+          for pkg in packages/config-provider-env packages/config-provider-json packages/config; do
+            (cd "$pkg" && yarn pack --out /tmp/preflight-pkg.tgz)
+            if tar -xOf /tmp/preflight-pkg.tgz package/package.json | grep -q 'workspace:'; then
+              echo "ERROR: workspace: token found in packed manifest for $pkg" >&2
+              rm -f /tmp/preflight-pkg.tgz
+              exit 1
+            fi
+            rm -f /tmp/preflight-pkg.tgz
+          done
+
       - name: Configure Git for HTTPS
         run: git config --global url.https://github.com/.insteadOf ssh://git@github.com/
 
