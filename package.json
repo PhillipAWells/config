@@ -36,7 +36,7 @@
 		"@nx/vite": "23.0.1",
 		"@nx/vitest": "23.0.1",
 		"@stylistic/eslint-plugin": "^5.10.0",
-		"@types/node": "^24.13.2",
+		"@types/node": "^26.0.1",
 		"@typescript-eslint/parser": "^8.62.0",
 		"@vitest/coverage-v8": "~4.1.0",
 		"eslint": "^10.5.0",
